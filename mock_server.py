@@ -105,180 +105,250 @@ def find_template(templates, method, path):
     return None, None
 
 def create_server_app(server_type="host"):
-    app = FastAPI()
+    try:
+        app = FastAPI()
 
-    @app.middleware("http")
-    async def intercept_requests(request: Request, call_next):
-        global config, templates
+        @app.middleware("http")
+        async def intercept_requests(request: Request, call_next):
+            global config, templates
 
-        config = load_config()
-        templates = load_templates()
+            config = load_config()
+            templates = load_templates()
 
-        request_body = None
-        if request.method in ['POST', 'PUT', 'PATCH']:
-            try:
-                request_body = await request.body()
-            except:
-                request_body = b''
-
-        template_key, template = None, None
-        if config.get("temper", True):
-            # Include query parameters in the template key
-            full_path = request.url.path
-            if request.url.query:
-                full_path += f"?{request.url.query}"
-            template_key, template = find_template(templates, request.method, full_path)
-
-        if template and template.get("silence", False):
-            silenced_response = template.get("response", {"status": "silenced", "message": "Request silenced"})
-            silenced_status = template.get("status_code", 200)
-            return JSONResponse(content=silenced_response, status_code=silenced_status)
-
-        if config.get("intercept_log", False):
-            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            full_url = str(request.url).replace(str(request.base_url), '/')
-            print(f"[{timestamp}] [{server_type.upper()}] {request.method} {full_url}")
-
-            headers_dict = dict(request.headers)
-            print(f"[{timestamp}] Headers: {headers_dict}")
-
-            if request_body:
+            request_body = None
+            if request.method in ['POST', 'PUT', 'PATCH']:
                 try:
-                    print(f"[{timestamp}] Body: {request_body.decode('utf-8', errors='ignore')}")
+                    request_body = await request.body()
                 except:
-                    print(f"[{timestamp}] Body: {request_body}")
+                    request_body = b''
 
-        response_content = None
-        response_status = 200
-        response_headers = {}
-
-        if config.get("passthrough", True):
-            try:
-                headers = dict(request.headers)
-
-                if server_type == "host":
-                    target_url = config.get("host_server_target", "https://mt.racers.co.kr/")
-                    headers['host'] = 'mt.racers.co.kr'
-                else:
-                    target_url = config.get("web_server_target", "https://www.racers.co.kr")
-                    headers['host'] = 'www.racers.co.kr'
-
-                url = f"{target_url.rstrip('/')}{request.url.path}"
+            template_key, template = None, None
+            if config.get("temper", True):
+                # Include query parameters in the template key
+                full_path = request.url.path
                 if request.url.query:
-                    url += f"?{request.url.query}"
+                    full_path += f"?{request.url.query}"
+                template_key, template = find_template(templates, request.method, full_path)
 
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    real_response = await client.request(
-                        method=request.method,
-                        url=url,
-                        headers=headers,
-                        content=request_body
-                    )
+            if template and template.get("silence", False):
+                silenced_response = template.get("response", {"status": "silenced", "message": "Request silenced"})
+                silenced_status = template.get("status_code", 200)
+                return JSONResponse(content=silenced_response, status_code=silenced_status)
 
-                # Store the real response
-                response_content = real_response.content
-                response_status = real_response.status_code
-                response_headers = dict(real_response.headers)
+            if config.get("intercept_log", False):
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                full_url = str(request.url).replace(str(request.base_url), '/')
+                print(f"[{timestamp}] [{server_type.upper()}] {request.method} {full_url}")
 
-            except Exception as e:
-                if config.get("intercept_log", False):
-                    print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Passthrough error: {e}")
+                headers_dict = dict(request.headers)
+                print(f"[{timestamp}] Headers: {headers_dict}")
+
+                if request_body:
+                    try:
+                        print(f"[{timestamp}] Body: {request_body.decode('utf-8', errors='ignore')}")
+                    except:
+                        print(f"[{timestamp}] Body: {request_body}")
+
+            response_content = None
+            response_status = 200
+            response_headers = {}
+
+            if config.get("passthrough", True):
+                try:
+                    headers = dict(request.headers)
+
+                    if server_type == "host":
+                        target_url = config.get("host_server_target", "https://mt.racers.co.kr/")
+                        headers['host'] = 'mt.racers.co.kr'
+                    else:
+                        target_url = config.get("web_server_target", "https://www.racers.co.kr")
+                        headers['host'] = 'www.racers.co.kr'
+
+                    url = f"{target_url.rstrip('/')}{request.url.path}"
+                    if request.url.query:
+                        url += f"?{request.url.query}"
+
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        real_response = await client.request(
+                            method=request.method,
+                            url=url,
+                            headers=headers,
+                            content=request_body
+                        )
+
+                    # Store the real response
+                    response_content = real_response.content
+                    response_status = real_response.status_code
+                    response_headers = dict(real_response.headers)
+
+                    # Capture config data for POST /config if no template exists
+                    if request.method == "POST" and request.url.path == "/config" and not template:
+                        try:
+                            response_data = real_response.json()
+                            if "configs" in response_data:
+                                # Save this as a template for future use
+                                template_data = {
+                                    f"{request.method} {request.url.path}": {
+                                        "response": response_data,
+                                        "status_code": real_response.status_code
+                                    }
+                                }
+
+                                # Save to a captured config template
+                                captured_template_path = TEMPER_PATH / "captured_config.json"
+                                with open(captured_template_path, 'w') as f:
+                                    json.dump(template_data, f, indent=2)
+
+                                # Reload templates to include the captured one
+                                templates = load_templates()
+                                template_key, template = find_template(templates, request.method, request.url.path)
+
+                        except Exception as e:
+                            print(f"Failed to capture config template: {e}")
+
+                except Exception as e:
+                    if config.get("intercept_log", False):
+                        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Passthrough error: {e}")
+                    response_content = b'{"status": "ok"}'
+                    response_status = 200
+                    response_headers = {"content-type": "application/json"}
+            else:
                 response_content = b'{"status": "ok"}'
                 response_status = 200
                 response_headers = {"content-type": "application/json"}
-        else:
-            response_content = b'{"status": "ok"}'
-            response_status = 200
-            response_headers = {"content-type": "application/json"}
 
-        # Apply template override if template exists (and not silenced)
-        if template:
-            template_response = template["response"]
-            template_status = template.get("status_code", 200)
+            # Apply template override if template exists (and not silenced)
+            if template:
+                template_response = template["response"]
+                template_status = template.get("status_code", 200)
 
-            # Special handling for POST /config - merge with cached values
-            if request.method == "POST" and request.url.path == "/config" and "configs" in template_response:
-                cached_config = load_cached_config()
-                if cached_config:
-                    # Merge template config with cached config (cached takes precedence)
-                    merged_configs = template_response["configs"].copy()
-                    merged_configs.update(cached_config)
-                    template_response = {"configs": merged_configs}
+                # Special handling for POST /config - merge with cached values
+                if request.method == "POST" and request.url.path == "/config" and "configs" in template_response:
+                    cached_config = load_cached_config()
+                    if cached_config:
+                        # Merge template config with cached config (cached takes precedence)
+                        merged_configs = template_response["configs"].copy()
+                        merged_configs.update(cached_config)
+                        template_response = {"configs": merged_configs}
 
-            # Special handling for HTML injection
-            if template.get("inject_ui", False) and response_content:
-                try:
-                    html_str = response_content.decode('utf-8', errors='ignore')
-                    modified_html = inject_config_ui(html_str)
-                    response_content = modified_html.encode('utf-8')
+                # Special handling for HTML injection
+                if template.get("inject_ui", False) and response_content:
+                    try:
+                        html_str = response_content.decode('utf-8', errors='ignore')
+                        modified_html = inject_config_ui(html_str)
+                        response_content = modified_html.encode('utf-8')
 
-                    # Remove Content-Length header since we're modifying content
-                    modified_headers = dict(response_headers)
-                    modified_headers.pop('content-length', None)
-                    modified_headers.pop('Content-Length', None)
+                        # Remove Content-Length header since we're modifying content
+                        modified_headers = dict(response_headers)
+                        modified_headers.pop('content-length', None)
+                        modified_headers.pop('Content-Length', None)
 
-                    # Return the modified response directly
-                    return Response(
-                        content=response_content,
-                        status_code=template_status,
-                        headers=modified_headers
-                    )
-                except Exception as e:
-                    print(f"HTML injection error: {e}")
-                    pass
+                        # Return the modified response directly
+                        return Response(
+                            content=response_content,
+                            status_code=template_status,
+                            headers=modified_headers
+                        )
+                    except Exception as e:
+                        print(f"HTML injection error: {e}")
+                        pass
 
-            # For non-HTML injection templates, return JSON response
-            if not template.get("inject_ui", False):
-                return JSONResponse(content=template_response, status_code=template_status)
+                # For non-HTML injection templates, return JSON response
+                if not template.get("inject_ui", False):
+                    return JSONResponse(content=template_response, status_code=template_status)
 
-        # For API requests and requests that don't match templates, continue to normal routing
-        # This allows API endpoints to work properly
-        if request.url.path.startswith('/api/'):
-            response = await call_next(request)
-            return response
+            # For API requests and requests that don't match templates, continue to normal routing
+            # This allows API endpoints to work properly
+            if request.url.path.startswith('/api/'):
+                response = await call_next(request)
+                return response
 
-        # For non-API requests that don't match templates, do passthrough
-        return Response(
-            content=response_content,
-            status_code=response_status,
-            headers=response_headers
-        )
+            # For non-API requests that don't match templates, do passthrough
+            return Response(
+                content=response_content,
+                status_code=response_status,
+                headers=response_headers
+            )
 
-    @app.get("/api/get-config")
-    async def get_config():
-        """Get current configuration for UI"""
-        templates = load_templates()
-        cached_config = load_cached_config()
+        @app.get("/api/get-config")
+        async def get_config():
+            """Get current configuration for UI"""
+            templates = load_templates()
+            cached_config = load_cached_config()
 
-        # Get base config from POST /config template
-        base_config = {}
-        if "POST /config" in templates:
-            config_template = templates["POST /config"]
-            if "response" in config_template and "configs" in config_template["response"]:
-                base_config = config_template["response"]["configs"].copy()
+            # Get base config from POST /config template
+            base_config = {}
+            if "POST /config" in templates:
+                config_template = templates["POST /config"]
+                if "response" in config_template and "configs" in config_template["response"]:
+                    base_config = config_template["response"]["configs"].copy()
 
-        # Merge with cached config (cached takes precedence)
-        base_config.update(cached_config)
+            # Merge with cached config (cached takes precedence)
+            base_config.update(cached_config)
 
-        return {"configs": base_config}
+            return {"configs": base_config}
 
-    @app.post("/api/save-config")
-    async def save_config(request: Request):
-        """Save configuration changes from UI"""
-        try:
-            data = await request.json()
-            configs = data.get("configs", {})
-            save_cached_config(configs)
-            return {"status": "saved", "message": "Configuration saved successfully"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        @app.post("/api/save-config")
+        async def save_config(request: Request):
+            """Save configuration changes from UI"""
+            try:
+                data = await request.json()
+                ui_configs = data.get("configs", {})
 
-    @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
-    async def catch_all(path: str = ""):
-        """Fallback route"""
-        return JSONResponse(content={"status": "ok"})
+                # Load template configs to compare
+                templates = load_templates()
+                template_configs = {}
+                if "POST /config" in templates:
+                    config_template = templates["POST /config"]
+                    if "response" in config_template and "configs" in config_template["response"]:
+                        template_configs = config_template["response"]["configs"]
 
-    return app
+                # Only save values that differ from templates (user modifications)
+                user_modifications = {}
+                for key, value in ui_configs.items():
+                    # Convert template values to strings for comparison (since JSON can have mixed types)
+                    template_value = template_configs.get(key)
+                    if template_value is not None:
+                        template_value_str = str(template_value)
+                        ui_value_str = str(value)
+                        # Only save if different from template
+                        if template_value_str != ui_value_str:
+                            user_modifications[key] = value
+                    else:
+                        # New key not in template - save it
+                        user_modifications[key] = value
+
+                save_cached_config(user_modifications)
+                return {"status": "saved", "message": "Configuration saved! Changes applied immediately."}
+            except Exception as e:
+                    return {"status": "error", "message": str(e)}
+
+        @app.post("/api/reset-config")
+        async def reset_config():
+            """Reset configuration to template defaults"""
+            try:
+                # Clear the cache file
+                TEMPER_CACHE_PATH.mkdir(exist_ok=True)
+                cache_file = TEMPER_CACHE_PATH / "config_cache.json"
+                with open(cache_file, 'w') as f:
+                    json.dump({}, f)
+
+                return {"status": "reset", "message": "Configuration reset to template defaults."}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+        async def catch_all(path: str = ""):
+            """Fallback route"""
+            return JSONResponse(content={"status": "ok"})
+
+        print(f"App setup complete for {server_type}")
+        return app
+    except Exception as e:
+        print(f"ERROR in create_server_app for {server_type}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def run_server(server_type, port):
     """Run a server of the specified type on the given port"""

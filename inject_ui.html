@@ -3,6 +3,7 @@
     <div style="margin-bottom: 10px;">
         <button id="add-setting" style="background: #17a2b8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">➕ Add Setting</button>
         <button id="reload-config" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">🔄 Reload</button>
+        <button id="reset-config" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">🔄 Reset to Template</button>
         <button id="toggle-ui" style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">🙈 Hide</button>
     </div>
     <div id="config-list" style="background: rgba(255,255,255,0.05); border-radius: 4px; padding: 10px; margin-bottom: 10px;"></div>
@@ -139,7 +140,7 @@ document.getElementById('save-config').addEventListener('click', function() {
     })
     .then(response => response.json())
     .then(data => {
-        alert('Configuration saved! Restart game to apply changes.');
+        alert(data.message || 'Configuration saved successfully!');
     })
     .catch(err => alert('Failed to save config: ' + err));
 });
@@ -148,6 +149,23 @@ document.getElementById('reload-config').addEventListener('click', function() {
     Promise.all([loadAllConfigKeys(), loadConfig()]).then(() => {
         renderConfigUI();
     });
+});
+
+document.getElementById('reset-config').addEventListener('click', function() {
+    if (confirm('Reset all config values to template defaults? This will clear your custom changes.')) {
+        fetch('/api/reset-config', {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(data.message || 'Configuration reset to template values.');
+            // Reload the config after reset
+            Promise.all([loadAllConfigKeys(), loadConfig()]).then(() => {
+                renderConfigUI();
+            });
+        })
+        .catch(err => alert('Failed to reset config: ' + err));
+    }
 });
 
 document.getElementById('toggle-ui').addEventListener('click', function() {
