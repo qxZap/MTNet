@@ -1,0 +1,5 @@
+{
+  "POST /event/*": {
+    "silence": true
+  }
+}

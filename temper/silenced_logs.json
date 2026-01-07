@@ -1,0 +1,5 @@
+{
+  "POST /log": {
+    "silence": true
+  }
+}
