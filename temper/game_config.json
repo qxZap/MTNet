@@ -1,0 +1,35 @@
+{
+  "POST /config": {
+    "response": {
+      "configs": {
+        "mh.logFPSPeriodSeconds": "600",
+        "mh.playerLogPeriodSeconds": "600",
+        "mh.hostServerKeepAlivePeriodSeconds": "60",
+        "mh.invalidPartsDisableEngine": "1",
+        "mh.invalidPartsLifespan": "1",
+        "mh.netPlayerLogFlushPeriodSeconds": "1200",
+        "mh.serverMessagePullPeriodSeconds": "600",
+        "mh.requestRewardsPeriodSeconds": "600",
+        "mh.busPaymentMultiplier": 3.5,
+        "mh.cargoPaymentMultiplier": 1,
+        "mh.limoPaymentMultiplier": 1.2,
+        "mh.taxiPaymentMultiplier": 2.7,
+        "mh.towPaymentMultiplier": 1,
+        "mh.policePatrolPayment": 800,
+        "mh.policePatrolPointPayment": 500,
+        "mh.policePatrolAreaPayment": 2000,
+        "mh.driverXPMultiplierOnAutopilot": 0.5,
+        "mh.vehicleDriftExpPerSeconds": 0.3,
+        "mh.townStateLogIntervalSeconds": 1200,
+        "mh.populationBonusByBus": 1,
+        "mh.populationBonusByFood": 1,
+        "mh.populationBonusByGarbage": 1,
+        "mh.populationBonusByTaxi": 1,
+        "mh.populationBonusByPatrol": 1,
+        "mh.populationPaymentBonusMax": 20.0,
+        "mh.populationPaymentBonusMultiplier": 1
+      }
+    },
+    "status_code": 200
+  }
+}

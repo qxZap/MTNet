@@ -1,0 +1,7 @@
+{
+  "GET /motortown?ingame=2&isdemo=0": {
+    "response": "html_injection",
+    "inject_ui": true,
+    "status_code": 200
+  }
+}

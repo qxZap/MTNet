@@ -1,0 +1,181 @@
+<div id="mh-config-ui" style="position: fixed; top: 10px; right: 10px; width: 450px; max-height: 80vh; overflow-y: auto; background: rgba(0,0,0,0.95); border: 2px solid #007bff; border-radius: 8px; padding: 15px; z-index: 10000; font-family: Arial, sans-serif; color: white;">
+    <h3 style="margin-top: 0; color: #007bff;">🎮 MH Config Editor</h3>
+    <div style="margin-bottom: 10px;">
+        <button id="add-setting" style="background: #17a2b8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">➕ Add Setting</button>
+        <button id="reload-config" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">🔄 Reload</button>
+        <button id="toggle-ui" style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">🙈 Hide</button>
+    </div>
+    <div id="config-list" style="background: rgba(255,255,255,0.05); border-radius: 4px; padding: 10px; margin-bottom: 10px;"></div>
+    <button id="save-config" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; width: 100%;">💾 Save All Changes</button>
+</div>
+
+<div id="mh-show-ui-btn" style="position: fixed; top: 10px; right: 10px; width: 40px; height: 40px; background: #007bff; border: 2px solid #007bff; border-radius: 50%; cursor: pointer; z-index: 9999; display: none; align-items: center; justify-content: center; font-size: 18px; color: white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+    ⚙️
+</div>
+
+<script>
+let currentConfig = {};
+let allAvailableKeys = [];
+
+function loadAllConfigKeys() {
+    // For now, just use the keys from current config
+    // TODO: Load from templates API when available
+    allAvailableKeys = Object.keys(currentConfig);
+    return Promise.resolve();
+}
+
+function loadConfig() {
+    return fetch('/api/get-config', {method: 'GET'})
+        .then(response => response.json())
+        .then(data => {
+            currentConfig = data.configs || {};
+            renderConfigUI();
+        })
+        .catch(err => console.error('Failed to load config:', err));
+}
+
+function renderConfigUI() {
+    const container = document.getElementById('config-list');
+    container.innerHTML = '';
+
+    // Get all unique keys from both available keys and current config
+    const allKeys = [...new Set([...allAvailableKeys, ...Object.keys(currentConfig)])];
+
+    allKeys.sort().forEach(key => {
+        const div = document.createElement('div');
+        div.style.marginBottom = '8px';
+        div.style.display = 'flex';
+        div.style.alignItems = 'center';
+        div.style.gap = '5px';
+
+        const label = document.createElement('label');
+        label.textContent = key.replace('mh.', '');
+        label.style.flex = '1';
+        label.style.fontSize = '12px';
+        label.style.color = 'white';
+        label.style.fontWeight = 'bold';
+
+        let input;
+        if (typeof currentConfig[key] === 'number' || !isNaN(parseFloat(currentConfig[key]))) {
+            input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.1';
+        } else {
+            input = document.createElement('input');
+            input.type = 'text';
+        }
+
+        input.value = currentConfig[key] !== undefined ? currentConfig[key] : '';
+        input.dataset.key = key;
+        input.style.flex = '2';
+        input.style.padding = '4px 8px';
+        input.style.background = 'rgba(255,255,255,0.1)';
+        input.style.border = '1px solid #555';
+        input.style.borderRadius = '3px';
+        input.style.color = 'white';
+        input.placeholder = 'Enter value...';
+
+        input.addEventListener('change', function() {
+            const value = this.type === 'number' ? parseFloat(this.value) : this.value;
+            if (this.value === '') {
+                delete currentConfig[this.dataset.key];
+            } else {
+                currentConfig[this.dataset.key] = value;
+            }
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = '❌';
+        removeBtn.style.background = 'transparent';
+        removeBtn.style.border = 'none';
+        removeBtn.style.color = '#ff6b6b';
+        removeBtn.style.cursor = 'pointer';
+        removeBtn.style.padding = '2px';
+        removeBtn.title = 'Remove this setting';
+
+        removeBtn.addEventListener('click', function() {
+            if (confirm(`Remove "${key}" from config?`)) {
+                delete currentConfig[key];
+                renderConfigUI();
+            }
+        });
+
+        div.appendChild(label);
+        div.appendChild(input);
+        div.appendChild(removeBtn);
+        container.appendChild(div);
+    });
+}
+
+function addNewSetting() {
+    const key = prompt('Enter new config key (e.g., mh.newSetting):');
+    if (key && key.trim()) {
+        const trimmedKey = key.trim();
+        if (!currentConfig.hasOwnProperty(trimmedKey)) {
+            currentConfig[trimmedKey] = '';
+            allAvailableKeys.push(trimmedKey);
+            renderConfigUI();
+
+            // Focus on the new input
+            setTimeout(() => {
+                const inputs = document.querySelectorAll(`input[data-key="${trimmedKey}"]`);
+                if (inputs.length > 0) {
+                    inputs[0].focus();
+                }
+            }, 100);
+        } else {
+            alert('This setting already exists!');
+        }
+    }
+}
+
+document.getElementById('add-setting').addEventListener('click', addNewSetting);
+
+document.getElementById('save-config').addEventListener('click', function() {
+    fetch('/api/save-config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({configs: currentConfig})
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert('Configuration saved! Restart game to apply changes.');
+    })
+    .catch(err => alert('Failed to save config: ' + err));
+});
+
+document.getElementById('reload-config').addEventListener('click', function() {
+    Promise.all([loadAllConfigKeys(), loadConfig()]).then(() => {
+        renderConfigUI();
+    });
+});
+
+document.getElementById('toggle-ui').addEventListener('click', function() {
+    hideMainUI();
+});
+
+document.getElementById('mh-show-ui-btn').addEventListener('click', function() {
+    showMainUI();
+});
+
+function hideMainUI() {
+    const mainUI = document.getElementById('mh-config-ui');
+    const showBtn = document.getElementById('mh-show-ui-btn');
+
+    mainUI.style.display = 'none';
+    showBtn.style.display = 'flex';
+}
+
+function showMainUI() {
+    const mainUI = document.getElementById('mh-config-ui');
+    const showBtn = document.getElementById('mh-show-ui-btn');
+
+    mainUI.style.display = 'block';
+    showBtn.style.display = 'none';
+}
+
+// Load config on page load
+Promise.all([loadAllConfigKeys(), loadConfig()]).then(() => {
+    renderConfigUI();
+});
+</script>

@@ -1,5 +1,5 @@
 {
-  "intercept_log": true,
+  "intercept_log": false,
   "passthrough": true,
   "temper": true
 }

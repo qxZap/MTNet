@@ -14,6 +14,7 @@ app = FastAPI()
 
 CONFIG_PATH = Path("server_config.json")
 TEMPER_PATH = Path("temper")
+TEMPER_CACHE_PATH = Path("temper_cache")
 
 def load_config():
     if CONFIG_PATH.exists():
@@ -26,6 +27,37 @@ def load_config():
         "host_server_target": "https://mt.racers.co.kr/",
         "web_server_target": "https://www.racers.co.kr"
     }
+
+def load_cached_config():
+    """Load cached config modifications"""
+    cache_file = TEMPER_CACHE_PATH / "config_cache.json"
+    if cache_file.exists():
+        try:
+            with open(cache_file, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+def save_cached_config(config_data):
+    """Save config modifications to cache"""
+    TEMPER_CACHE_PATH.mkdir(exist_ok=True)
+    cache_file = TEMPER_CACHE_PATH / "config_cache.json"
+    with open(cache_file, 'w') as f:
+        json.dump(config_data, f, indent=2)
+
+def inject_config_ui(html_content):
+    """Inject configuration UI into HTML"""
+    try:
+        with open('inject_ui.html', 'r', encoding='utf-8') as f:
+            config_ui = f.read()
+    except Exception as e:
+        config_ui = f'<div style="color: red;">UI injection error: {e}</div>'
+
+    if '</body>' in html_content:
+        return html_content.replace('</body>', config_ui + '</body>')
+    else:
+        return html_content + config_ui
 
 def load_templates():
     templates = {}
@@ -91,7 +123,11 @@ def create_server_app(server_type="host"):
 
         template_key, template = None, None
         if config.get("temper", True):
-            template_key, template = find_template(templates, request.method, request.url.path)
+            # Include query parameters in the template key
+            full_path = request.url.path
+            if request.url.query:
+                full_path += f"?{request.url.query}"
+            template_key, template = find_template(templates, request.method, full_path)
 
         if template and template.get("silence", False):
             silenced_response = template.get("response", {"status": "silenced", "message": "Request silenced"})
@@ -107,9 +143,11 @@ def create_server_app(server_type="host"):
             print(f"[{timestamp}] Headers: {headers_dict}")
 
             if request_body:
-                print(f"[{timestamp}] Body: {request_body.decode('utf-8', errors='ignore')}")
+                try:
+                    print(f"[{timestamp}] Body: {request_body.decode('utf-8', errors='ignore')}")
+                except:
+                    print(f"[{timestamp}] Body: {request_body}")
 
-        # Get response - either from passthrough or default
         response_content = None
         response_status = 200
         response_headers = {}
@@ -129,9 +167,6 @@ def create_server_app(server_type="host"):
                 if request.url.query:
                     url += f"?{request.url.query}"
 
-                if config.get("intercept_log", False):
-                    print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Passthrough to: {url}")
-
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     real_response = await client.request(
                         method=request.method,
@@ -140,12 +175,10 @@ def create_server_app(server_type="host"):
                         content=request_body
                     )
 
-                    if config.get("intercept_log", False):
-                        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Real server response: {real_response.status_code}")
-
-                    response_content = real_response.content
-                    response_status = real_response.status_code
-                    response_headers = dict(real_response.headers)
+                # Store the real response
+                response_content = real_response.content
+                response_status = real_response.status_code
+                response_headers = dict(real_response.headers)
 
             except Exception as e:
                 if config.get("intercept_log", False):
@@ -163,14 +196,82 @@ def create_server_app(server_type="host"):
             template_response = template["response"]
             template_status = template.get("status_code", 200)
 
-            return JSONResponse(content=template_response, status_code=template_status)
+            # Special handling for POST /config - merge with cached values
+            if request.method == "POST" and request.url.path == "/config" and "configs" in template_response:
+                cached_config = load_cached_config()
+                if cached_config:
+                    # Merge template config with cached config (cached takes precedence)
+                    merged_configs = template_response["configs"].copy()
+                    merged_configs.update(cached_config)
+                    template_response = {"configs": merged_configs}
 
-        # Return the response (either from passthrough or default)
+            # Special handling for HTML injection
+            if template.get("inject_ui", False) and response_content:
+                try:
+                    html_str = response_content.decode('utf-8', errors='ignore')
+                    modified_html = inject_config_ui(html_str)
+                    response_content = modified_html.encode('utf-8')
+
+                    # Remove Content-Length header since we're modifying content
+                    modified_headers = dict(response_headers)
+                    modified_headers.pop('content-length', None)
+                    modified_headers.pop('Content-Length', None)
+
+                    # Return the modified response directly
+                    return Response(
+                        content=response_content,
+                        status_code=template_status,
+                        headers=modified_headers
+                    )
+                except Exception as e:
+                    print(f"HTML injection error: {e}")
+                    pass
+
+            # For non-HTML injection templates, return JSON response
+            if not template.get("inject_ui", False):
+                return JSONResponse(content=template_response, status_code=template_status)
+
+        # For API requests and requests that don't match templates, continue to normal routing
+        # This allows API endpoints to work properly
+        if request.url.path.startswith('/api/'):
+            response = await call_next(request)
+            return response
+
+        # For non-API requests that don't match templates, do passthrough
         return Response(
             content=response_content,
             status_code=response_status,
             headers=response_headers
         )
+
+    @app.get("/api/get-config")
+    async def get_config():
+        """Get current configuration for UI"""
+        templates = load_templates()
+        cached_config = load_cached_config()
+
+        # Get base config from POST /config template
+        base_config = {}
+        if "POST /config" in templates:
+            config_template = templates["POST /config"]
+            if "response" in config_template and "configs" in config_template["response"]:
+                base_config = config_template["response"]["configs"].copy()
+
+        # Merge with cached config (cached takes precedence)
+        base_config.update(cached_config)
+
+        return {"configs": base_config}
+
+    @app.post("/api/save-config")
+    async def save_config(request: Request):
+        """Save configuration changes from UI"""
+        try:
+            data = await request.json()
+            configs = data.get("configs", {})
+            save_cached_config(configs)
+            return {"status": "saved", "message": "Configuration saved successfully"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
     async def catch_all(path: str = ""):
@@ -182,41 +283,50 @@ def create_server_app(server_type="host"):
 def run_server(server_type, port):
     """Run a server of the specified type on the given port"""
     app = create_server_app(server_type)
-    print(f"🚀 Starting {server_type.upper()} server on port {port}")
+    if app is None:
+        print(f"ERROR: create_server_app returned None for {server_type}")
+        return
 
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="error")
 
 if __name__ == '__main__':
     import threading
 
-    # Load initial config
+    # Parse command line arguments for ports
+    host_port = int(sys.argv[1]) if len(sys.argv) > 1 else 81
+    web_port = int(sys.argv[2]) if len(sys.argv) > 2 else 82
+
+    # Load initial config and templates
     config = load_config()
+    templates = load_templates()
 
     print("🚀 Starting Dual Server Setup")
     print(f"📝 Logging: {'enabled' if config.get('intercept_log') else 'disabled'}")
     print(f"🔄 Passthrough: {'enabled' if config.get('passthrough') else 'disabled'}")
     print(f"🎯 Templates: {'enabled' if config.get('temper') else 'disabled'}")
+    print(f"📋 Templates loaded: {len(templates)}")
+    print("Press Ctrl+C to stop both servers")
     print()
 
-    # Create and start host server (port 81)
+    # Create and start host server
     host_thread = threading.Thread(
         target=run_server,
-        args=("host", 81),
+        args=("host", host_port),
         daemon=True
     )
     host_thread.start()
 
-    # Create and start web server (port 82)
+    # Create and start web server
     web_thread = threading.Thread(
         target=run_server,
-        args=("web", 82),
+        args=("web", web_port),
         daemon=True
     )
     web_thread.start()
 
     print("✅ Both servers started!")
-    print("🌐 Host Server (mh.hostServerUrl): http://localhost:81 -> https://mt.racers.co.kr/")
-    print("🌐 Web Server (mh.webServerUrl): http://localhost:82 -> https://www.racers.co.kr")
+    print(f"🌐 Host Server (mh.hostServerUrl): http://localhost:{host_port} -> https://mt.racers.co.kr/")
+    print(f"🌐 Web Server (mh.webServerUrl): http://localhost:{web_port} -> https://www.racers.co.kr")
     print("Press Ctrl+C to stop both servers")
     print()
 
