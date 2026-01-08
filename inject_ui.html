@@ -1,5 +1,5 @@
-<div id="mh-config-ui" style="position: fixed; top: 10px; right: 10px; width: 450px; max-height: 80vh; overflow-y: auto; background: rgba(0,0,0,0.95); border: 2px solid #007bff; border-radius: 8px; padding: 15px; z-index: 10000; font-family: Arial, sans-serif; color: white;">
-    <h3 style="margin-top: 0; color: #007bff;">🎮 MH Config Editor</h3>
+<div id="mh-config-ui" style="position: fixed; top: 10px; right: 10px; width: 600px; max-height: 90vh; overflow-y: auto; background: rgba(0,0,0,0.95); border: 2px solid #007bff; border-radius: 8px; padding: 15px; z-index: 10000; font-family: Arial, sans-serif; color: white; display: none;">
+    <h3 style="margin-top: 0; color: #007bff;">🔧 MT Net</h3>
     <div style="margin-bottom: 10px;">
         <button id="add-setting" style="background: #17a2b8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">➕ Add Setting</button>
         <button id="reload-config" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">🔄 Reload</button>
@@ -10,7 +10,7 @@
     <button id="save-config" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; width: 100%;">💾 Save All Changes</button>
 </div>
 
-<div id="mh-show-ui-btn" style="position: fixed; top: 10px; right: 10px; width: 40px; height: 40px; background: #007bff; border: 2px solid #007bff; border-radius: 50%; cursor: pointer; z-index: 9999; display: none; align-items: center; justify-content: center; font-size: 18px; color: white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+<div id="mh-show-ui-btn" style="position: fixed; top: 10px; right: 10px; width: 40px; height: 40px; background: #007bff; border: 2px solid #007bff; border-radius: 50%; cursor: pointer; z-index: 9999; display: flex; align-items: center; justify-content: center; font-size: 18px; color: white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
     ⚙️
 </div>
 
@@ -50,11 +50,13 @@ function renderConfigUI() {
         div.style.gap = '5px';
 
         const label = document.createElement('label');
-        label.textContent = key.replace('mh.', '');
-        label.style.flex = '1';
+        label.textContent = key;
+        label.style.flex = '1.5';
         label.style.fontSize = '12px';
         label.style.color = 'white';
         label.style.fontWeight = 'bold';
+        label.style.wordBreak = 'break-all';
+        label.style.whiteSpace = 'normal';
 
         let input;
         if (typeof currentConfig[key] === 'number' || !isNaN(parseFloat(currentConfig[key]))) {
@@ -68,7 +70,7 @@ function renderConfigUI() {
 
         input.value = currentConfig[key] !== undefined ? currentConfig[key] : '';
         input.dataset.key = key;
-        input.style.flex = '2';
+        input.style.flex = '1.5';
         input.style.padding = '4px 8px';
         input.style.background = 'rgba(255,255,255,0.1)';
         input.style.border = '1px solid #555';
@@ -109,7 +111,7 @@ function renderConfigUI() {
 }
 
 function addNewSetting() {
-    const key = prompt('Enter new config key (e.g., mh.newSetting):');
+    const key = prompt('Enter new config key (e.g., mh.vehicleTopSpeed or any cvar):');
     if (key && key.trim()) {
         const trimmedKey = key.trim();
         if (!currentConfig.hasOwnProperty(trimmedKey)) {
