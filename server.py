@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -8,6 +7,7 @@ import json
 import sys
 import os
 import datetime
+import asyncio
 from pathlib import Path
 
 app = FastAPI()
@@ -37,6 +37,27 @@ def load_cached_config():
                 return json.load(f)
         except:
             pass
+    else:
+        try:
+            async def fetch_remote_config():
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        "https://mt.racers.co.kr/config",
+                        json={"account_id": 0, "version": "0"},
+                        headers={"Content-Type": "application/json"}
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        if "configs" in data:
+                            TEMPER_CACHE_PATH.mkdir(exist_ok=True)
+                            with open(cache_file, 'w') as f:
+                                json.dump(data["configs"], f, indent=2)
+                            return data["configs"]
+            result = asyncio.run(fetch_remote_config())
+            if result:
+                return result
+        except Exception as e:
+            print(f"Failed to fetch remote config: {e}")
     return {}
 
 def save_cached_config(config_data):
@@ -82,24 +103,18 @@ def find_template(templates, method, path):
     if exact_key in templates:
         return exact_key, templates[exact_key]
 
-    # Try wildcard matches
     for template_key, template in templates.items():
         if '/*' in template_key:
-            # Split template key into method and path pattern
             template_parts = template_key.split(' ', 1)
             if len(template_parts) == 2:
                 template_method, template_path_pattern = template_parts
 
-                # Check if methods match
                 if template_method == method:
-                    # Convert wildcard pattern to regex
-                    # Escape special regex chars and replace * with .*
                     pattern = re.escape(template_path_pattern).replace(r'\*', '.*')
                     try:
                         if re.match(f"^{pattern}$", path):
                             return template_key, template
                     except re.error:
-                        # Invalid regex pattern, skip
                         continue
 
     return None, None
@@ -124,7 +139,6 @@ def create_server_app(server_type="host"):
 
             template_key, template = None, None
             if config.get("temper", True):
-                # Include query parameters in the template key
                 full_path = request.url.path
                 if request.url.query:
                     full_path += f"?{request.url.query}"
@@ -176,17 +190,14 @@ def create_server_app(server_type="host"):
                             content=request_body
                         )
 
-                    # Store the real response
                     response_content = real_response.content
                     response_status = real_response.status_code
                     response_headers = dict(real_response.headers)
 
-                    # Capture config data for POST /config if no template exists
                     if request.method == "POST" and request.url.path == "/config" and not template:
                         try:
                             response_data = real_response.json()
                             if "configs" in response_data:
-                                # Save this as a template for future use
                                 template_data = {
                                     f"{request.method} {request.url.path}": {
                                         "response": response_data,
@@ -194,12 +205,10 @@ def create_server_app(server_type="host"):
                                     }
                                 }
 
-                                # Save to a captured config template
                                 captured_template_path = TEMPER_PATH / "captured_config.json"
                                 with open(captured_template_path, 'w') as f:
                                     json.dump(template_data, f, indent=2)
 
-                                # Reload templates to include the captured one
                                 templates = load_templates()
                                 template_key, template = find_template(templates, request.method, request.url.path)
 
@@ -217,33 +226,48 @@ def create_server_app(server_type="host"):
                 response_status = 200
                 response_headers = {"content-type": "application/json"}
 
-            # Apply template override if template exists (and not silenced)
+            if template and "request_body" in template:
+                try:
+                    template_request_body = template["request_body"]
+                    if isinstance(template_request_body, dict):
+                        if request_body:
+                            try:
+                                existing_body = json.loads(request_body.decode('utf-8'))
+                                existing_body.update(template_request_body)
+                                request_body = json.dumps(existing_body).encode('utf-8')
+                            except:
+                                request_body = json.dumps(template_request_body).encode('utf-8')
+                        else:
+                            request_body = json.dumps(template_request_body).encode('utf-8')
+                    elif isinstance(template_request_body, str):
+                        request_body = template_request_body.encode('utf-8')
+                    if config.get("intercept_log", False):
+                        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        print(f"[{timestamp}] Request body tempered: {request_body.decode('utf-8', errors='ignore')}")
+                except Exception as e:
+                    print(f"Request body tempering error: {e}")
+
             if template:
                 template_response = template["response"]
                 template_status = template.get("status_code", 200)
 
-                # Special handling for POST /config - merge with cached values
                 if request.method == "POST" and request.url.path == "/config" and "configs" in template_response:
                     cached_config = load_cached_config()
                     if cached_config:
-                        # Merge template config with cached config (cached takes precedence)
                         merged_configs = template_response["configs"].copy()
                         merged_configs.update(cached_config)
                         template_response = {"configs": merged_configs}
 
-                # Special handling for HTML injection
                 if template.get("inject_ui", False) and response_content:
                     try:
                         html_str = response_content.decode('utf-8', errors='ignore')
                         modified_html = inject_config_ui(html_str)
                         response_content = modified_html.encode('utf-8')
 
-                        # Remove Content-Length header since we're modifying content
                         modified_headers = dict(response_headers)
                         modified_headers.pop('content-length', None)
                         modified_headers.pop('Content-Length', None)
 
-                        # Return the modified response directly
                         return Response(
                             content=response_content,
                             status_code=template_status,
@@ -253,17 +277,13 @@ def create_server_app(server_type="host"):
                         print(f"HTML injection error: {e}")
                         pass
 
-                # For non-HTML injection templates, return JSON response
                 if not template.get("inject_ui", False):
                     return JSONResponse(content=template_response, status_code=template_status)
 
-            # For API requests and requests that don't match templates, continue to normal routing
-            # This allows API endpoints to work properly
             if request.url.path.startswith('/api/'):
                 response = await call_next(request)
                 return response
 
-            # For non-API requests that don't match templates, do passthrough
             return Response(
                 content=response_content,
                 status_code=response_status,
@@ -272,30 +292,25 @@ def create_server_app(server_type="host"):
 
         @app.get("/api/get-config")
         async def get_config():
-            """Get current configuration for UI"""
             templates = load_templates()
             cached_config = load_cached_config()
 
-            # Get base config from POST /config template
             base_config = {}
             if "POST /config" in templates:
                 config_template = templates["POST /config"]
                 if "response" in config_template and "configs" in config_template["response"]:
                     base_config = config_template["response"]["configs"].copy()
 
-            # Merge with cached config (cached takes precedence)
             base_config.update(cached_config)
 
             return {"configs": base_config}
 
         @app.post("/api/save-config")
         async def save_config(request: Request):
-            """Save configuration changes from UI"""
             try:
                 data = await request.json()
                 ui_configs = data.get("configs", {})
 
-                # Load template configs to compare
                 templates = load_templates()
                 template_configs = {}
                 if "POST /config" in templates:
@@ -303,19 +318,15 @@ def create_server_app(server_type="host"):
                     if "response" in config_template and "configs" in config_template["response"]:
                         template_configs = config_template["response"]["configs"]
 
-                # Only save values that differ from templates (user modifications)
                 user_modifications = {}
                 for key, value in ui_configs.items():
-                    # Convert template values to strings for comparison (since JSON can have mixed types)
                     template_value = template_configs.get(key)
                     if template_value is not None:
                         template_value_str = str(template_value)
                         ui_value_str = str(value)
-                        # Only save if different from template
                         if template_value_str != ui_value_str:
                             user_modifications[key] = value
                     else:
-                        # New key not in template - save it
                         user_modifications[key] = value
 
                 save_cached_config(user_modifications)
@@ -325,15 +336,103 @@ def create_server_app(server_type="host"):
 
         @app.post("/api/reset-config")
         async def reset_config():
-            """Reset configuration to template defaults"""
             try:
-                # Clear the cache file
                 TEMPER_CACHE_PATH.mkdir(exist_ok=True)
                 cache_file = TEMPER_CACHE_PATH / "config_cache.json"
                 with open(cache_file, 'w') as f:
                     json.dump({}, f)
 
                 return {"status": "reset", "message": "Configuration reset to template defaults."}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        @app.get("/api/list-templates")
+        async def list_templates():
+            """List available user templates"""
+            try:
+                templates_dir = TEMPER_PATH / "templates"
+                templates_dir.mkdir(exist_ok=True)
+
+                templates = []
+                for template_file in templates_dir.glob("*.json"):
+                    try:
+                        with open(template_file, 'r') as f:
+                            data = json.load(f)
+                            templates.append({
+                                "name": template_file.stem,
+                                "file": template_file.name,
+                                "title": data.get("title", template_file.stem),
+                                "description": data.get("description", ""),
+                                "created": data.get("created", ""),
+                                "variables": len(data.get("configs", {}))
+                            })
+                    except:
+                        pass
+
+                return {"templates": templates}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        @app.post("/api/save-template")
+        async def save_template(request: Request):
+            """Save current configuration as a template"""
+            try:
+                data = await request.json()
+                template_name = data.get("name", "").strip()
+                template_title = data.get("title", "").strip()
+                description = data.get("description", "").strip()
+
+                if not template_name:
+                    return {"status": "error", "message": "Template name is required"}
+
+                if not template_title:
+                    return {"status": "error", "message": "Template title is required"}
+
+                get_config_response = await get_config()
+                current_configs = get_config_response.get("configs", {})
+
+                template_data = {
+                    "title": template_title,
+                    "description": description,
+                    "created": datetime.datetime.now().isoformat(),
+                    "configs": current_configs
+                }
+
+                templates_dir = TEMPER_PATH / "templates"
+                templates_dir.mkdir(exist_ok=True)
+
+                template_file = templates_dir / f"{template_name}.json"
+                with open(template_file, 'w') as f:
+                    json.dump(template_data, f, indent=2)
+
+                return {"status": "saved", "message": f"Template '{template_title}' saved successfully!"}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        @app.post("/api/load-template")
+        async def load_template(request: Request):
+            """Load a template and apply its configuration"""
+            try:
+                data = await request.json()
+                template_name = data.get("name", "").strip()
+
+                if not template_name:
+                    return {"status": "error", "message": "Template name is required"}
+
+                templates_dir = TEMPER_PATH / "templates"
+                template_file = templates_dir / f"{template_name}.json"
+
+                if not template_file.exists():
+                    return {"status": "error", "message": "Template not found"}
+
+                with open(template_file, 'r') as f:
+                    template_data = json.load(f)
+
+                template_configs = template_data.get("configs", {})
+
+                save_cached_config(template_configs)
+
+                return {"status": "loaded", "message": f"Template '{template_name}' loaded successfully!", "configs": template_configs}
             except Exception as e:
                 return {"status": "error", "message": str(e)}
 
@@ -362,11 +461,9 @@ def run_server(server_type, port):
 if __name__ == '__main__':
     import threading
 
-    # Parse command line arguments for ports
     host_port = int(sys.argv[1]) if len(sys.argv) > 1 else 81
     web_port = int(sys.argv[2]) if len(sys.argv) > 2 else 82
 
-    # Load initial config and templates
     config = load_config()
     templates = load_templates()
 
@@ -377,8 +474,6 @@ if __name__ == '__main__':
     print(f"📋 Templates loaded: {len(templates)}")
     print("Press Ctrl+C to stop both servers")
     print()
-
-    # Create and start host server
     host_thread = threading.Thread(
         target=run_server,
         args=("host", host_port),
@@ -386,7 +481,6 @@ if __name__ == '__main__':
     )
     host_thread.start()
 
-    # Create and start web server
     web_thread = threading.Thread(
         target=run_server,
         args=("web", web_port),
@@ -401,7 +495,6 @@ if __name__ == '__main__':
     print()
 
     try:
-        # Keep main thread alive
         while True:
             import time
             time.sleep(1)

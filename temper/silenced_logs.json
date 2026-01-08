@@ -1,5 +1,17 @@
 {
   "POST /log": {
     "silence": true
+  },
+  "POST /account_modify": {
+    "silence": true
+  },
+  "POST /character": {
+    "silence": true
+  },
+  "POST /building": {
+    "silence": true
+  },
+  "POST /workshop/installed": {
+    "silence": true
   }
 }

@@ -4,8 +4,14 @@
         <button id="add-setting" style="background: #17a2b8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">➕ Add Setting</button>
         <button id="reload-config" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">🔄 Reload</button>
         <button id="reset-config" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">🔄 Reset to Template</button>
+        <button id="save-template" style="background: #28a745; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">💾 Save Template</button>
         <button id="toggle-ui" style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">🙈 Hide</button>
     </div>
+    <div style="margin-bottom: 10px;">
+        <button id="show-templates" style="background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">📂 Load Template</button>
+        <button id="hide-templates" style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; display: none;">❌ Cancel</button>
+    </div>
+    <div id="templates-list" style="display: none; background: rgba(0,0,0,0.95); border: 1px solid #007bff; border-radius: 4px; padding: 10px; margin-bottom: 10px; max-height: 280px; overflow-y: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>
     <div id="config-list" style="background: rgba(255,255,255,0.05); border-radius: 4px; padding: 10px; margin-bottom: 10px;"></div>
     <button id="save-config" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; width: 100%;">💾 Save All Changes</button>
 </div>
@@ -17,10 +23,9 @@
 <script>
 let currentConfig = {};
 let allAvailableKeys = [];
+let templateOnlyMode = false;
 
 function loadAllConfigKeys() {
-    // For now, just use the keys from current config
-    // TODO: Load from templates API when available
     allAvailableKeys = Object.keys(currentConfig);
     return Promise.resolve();
 }
@@ -29,8 +34,13 @@ function loadConfig() {
     return fetch('/api/get-config', {method: 'GET'})
         .then(response => response.json())
         .then(data => {
-            currentConfig = data.configs || {};
-            renderConfigUI();
+            if (!templateOnlyMode) {
+                currentConfig = data.configs || {};
+                allAvailableKeys = Object.keys(currentConfig);
+            }
+            if (!templateOnlyMode) {
+                renderConfigUI();
+            }
         })
         .catch(err => console.error('Failed to load config:', err));
 }
@@ -39,7 +49,6 @@ function renderConfigUI() {
     const container = document.getElementById('config-list');
     container.innerHTML = '';
 
-    // Get all unique keys from both available keys and current config
     const allKeys = [...new Set([...allAvailableKeys, ...Object.keys(currentConfig)])];
 
     allKeys.sort().forEach(key => {
@@ -119,7 +128,6 @@ function addNewSetting() {
             allAvailableKeys.push(trimmedKey);
             renderConfigUI();
 
-            // Focus on the new input
             setTimeout(() => {
                 const inputs = document.querySelectorAll(`input[data-key="${trimmedKey}"]`);
                 if (inputs.length > 0) {
@@ -148,9 +156,13 @@ document.getElementById('save-config').addEventListener('click', function() {
 });
 
 document.getElementById('reload-config').addEventListener('click', function() {
-    Promise.all([loadAllConfigKeys(), loadConfig()]).then(() => {
+    if (templateOnlyMode) {
         renderConfigUI();
-    });
+    } else {
+        Promise.all([loadAllConfigKeys(), loadConfig()]).then(() => {
+            renderConfigUI();
+        });
+    }
 });
 
 document.getElementById('reset-config').addEventListener('click', function() {
@@ -161,7 +173,7 @@ document.getElementById('reset-config').addEventListener('click', function() {
         .then(response => response.json())
         .then(data => {
             alert(data.message || 'Configuration reset to template values.');
-            // Reload the config after reset
+            templateOnlyMode = false;
             Promise.all([loadAllConfigKeys(), loadConfig()]).then(() => {
                 renderConfigUI();
             });
@@ -169,6 +181,167 @@ document.getElementById('reset-config').addEventListener('click', function() {
         .catch(err => alert('Failed to reset config: ' + err));
     }
 });
+
+document.getElementById('save-template').addEventListener('click', function() {
+    const templateName = prompt('Enter template filename (e.g., racing_setup):');
+    if (templateName && templateName.trim()) {
+        const templateTitle = prompt('Enter template title (display name):');
+        if (templateTitle && templateTitle.trim()) {
+            const description = prompt('Enter template description (optional):') || '';
+            fetch('/api/save-template', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: templateName.trim(),
+                    title: templateTitle.trim(),
+                    description: description.trim()
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message || 'Template saved successfully!');
+            })
+            .catch(err => alert('Failed to save template: ' + err));
+        }
+    }
+});
+
+document.getElementById('show-templates').addEventListener('click', function() {
+    const templatesList = document.getElementById('templates-list');
+    const showBtn = document.getElementById('show-templates');
+    const hideBtn = document.getElementById('hide-templates');
+
+    if (templatesList.style.display === 'none') {
+        loadTemplates();
+        templatesList.style.display = 'block';
+        showBtn.style.display = 'none';
+        hideBtn.style.display = 'inline-block';
+    }
+});
+
+document.getElementById('hide-templates').addEventListener('click', function() {
+    const templatesList = document.getElementById('templates-list');
+    const showBtn = document.getElementById('show-templates');
+    const hideBtn = document.getElementById('hide-templates');
+
+    templatesList.style.display = 'none';
+    showBtn.style.display = 'inline-block';
+    hideBtn.style.display = 'none';
+});
+
+function loadTemplate(templateName, templateTitle) {
+    if (confirm(`Load template "${templateTitle}"? This will replace your current configuration.`)) {
+        fetch('/api/load-template', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: templateName})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'loaded') {
+                currentConfig = data.configs || {};
+                allAvailableKeys = Object.keys(currentConfig);
+                templateOnlyMode = true;
+
+                alert(data.message || 'Template loaded successfully!');
+                // Hide the templates list
+                document.getElementById('templates-list').style.display = 'none';
+                document.getElementById('show-templates').style.display = 'inline-block';
+                document.getElementById('hide-templates').style.display = 'none';
+                // Re-render UI with only template values
+                renderConfigUI();
+            } else {
+                alert('Failed to load template: ' + data.message);
+            }
+        })
+        .catch(err => alert('Failed to load template: ' + err));
+    }
+}
+
+function loadTemplates() {
+    fetch('/api/list-templates')
+        .then(response => response.json())
+        .then(data => {
+            const templatesList = document.getElementById('templates-list');
+            templatesList.innerHTML = '';
+
+            if (data.templates && data.templates.length > 0) {
+                data.templates.forEach(template => {
+                    const templateDiv = document.createElement('div');
+                    templateDiv.style.cssText = `
+                        background: rgba(255,255,255,0.05);
+                        border: 1px solid #555;
+                        border-radius: 4px;
+                        padding: 8px;
+                        margin-bottom: 5px;
+                        cursor: pointer;
+                        color: white;
+                        transition: background-color 0.2s;
+                    `;
+
+                    const titleDiv = document.createElement('div');
+                    titleDiv.style.fontWeight = 'bold';
+                    titleDiv.style.marginBottom = '2px';
+                    titleDiv.textContent = template.title;
+
+                    const infoDiv = document.createElement('div');
+                    infoDiv.style.fontSize = '11px';
+                    infoDiv.style.color = '#ccc';
+                    infoDiv.textContent = `${template.variables} variables`;
+
+                    if (template.description) {
+                        const descDiv = document.createElement('div');
+                        descDiv.style.fontSize = '11px';
+                        descDiv.style.color = '#aaa';
+                        descDiv.style.marginTop = '2px';
+                        descDiv.textContent = template.description;
+                        templateDiv.appendChild(descDiv);
+                    }
+
+                    if (template.created) {
+                        const dateDiv = document.createElement('div');
+                        dateDiv.style.fontSize = '10px';
+                        dateDiv.style.color = '#888';
+                        dateDiv.style.marginTop = '1px';
+                        dateDiv.textContent = `Created: ${new Date(template.created).toLocaleDateString()}`;
+                        infoDiv.appendChild(dateDiv);
+                    }
+
+                    templateDiv.appendChild(titleDiv);
+                    templateDiv.appendChild(infoDiv);
+
+                    templateDiv.addEventListener('mouseenter', function() {
+                        this.style.background = 'rgba(0,123,255,0.2)';
+                    });
+
+                    templateDiv.addEventListener('mouseleave', function() {
+                        this.style.background = 'rgba(255,255,255,0.05)';
+                    });
+
+                    templateDiv.addEventListener('click', function() {
+                        loadTemplate(template.name, template.title);
+                    });
+
+                    templatesList.appendChild(templateDiv);
+                });
+            } else {
+                const noTemplatesDiv = document.createElement('div');
+                noTemplatesDiv.style.cssText = `
+                    color: #888;
+                    text-align: center;
+                    padding: 20px;
+                    font-style: italic;
+                `;
+                noTemplatesDiv.textContent = 'No templates found. Save some configurations first!';
+                templatesList.appendChild(noTemplatesDiv);
+            }
+        })
+        .catch(err => {
+            console.error('Failed to load templates:', err);
+            const templatesList = document.getElementById('templates-list');
+            templatesList.innerHTML = '<div style="color: #ff6b6b; text-align: center; padding: 20px;">Failed to load templates</div>';
+        });
+}
 
 document.getElementById('toggle-ui').addEventListener('click', function() {
     hideMainUI();
