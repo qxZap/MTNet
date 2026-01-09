@@ -112,8 +112,7 @@ File Structure:
 - server.py: Main server program
 - server_config.json: Server settings
 - requirements.txt: Python packages needed
-- install.bat: Installs dependencies
-- server.bat: Starts the server
+- server.bat: Installs dependencies and starts the server
 - inject_ui.html: The in-game menu interface
 - temper/: Template storage
   - game_config.json: Basic game settings

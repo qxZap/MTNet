@@ -286,6 +286,11 @@ def create_server_app(server_type="host"):
                 headers=response_headers
             )
 
+        @app.get("/mtnet/test/conn")
+        async def test_connection():
+            """Test endpoint to check if server is running"""
+            return {"status": "MTNet server is running", "version": "1.0"}
+
         @app.get("/api/get-config")
         async def get_config():
             templates = load_templates()
