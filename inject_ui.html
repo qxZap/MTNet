@@ -9,9 +9,11 @@
     </div>
     <div style="margin-bottom: 10px;">
         <button id="show-templates" style="background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">📂 Load Template</button>
+        <button id="show-merge-templates" style="background: #28a745; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-right: 5px;">🔀 Merge with Template</button>
         <button id="hide-templates" style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; display: none;">❌ Cancel</button>
     </div>
     <div id="templates-list" style="display: none; background: rgba(0,0,0,0.95); border: 1px solid #007bff; border-radius: 4px; padding: 10px; margin-bottom: 10px; max-height: 280px; overflow-y: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>
+    <div id="merge-templates-list" style="display: none; background: rgba(0,0,0,0.95); border: 1px solid #28a745; border-radius: 4px; padding: 10px; margin-bottom: 10px; max-height: 280px; overflow-y: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>
     <div id="config-list" style="background: rgba(255,255,255,0.05); border-radius: 4px; padding: 10px; margin-bottom: 10px;"></div>
     <button id="save-config" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; width: 100%;">💾 Save All Changes</button>
 </div>
@@ -188,13 +190,15 @@ document.getElementById('save-template').addEventListener('click', function() {
         const templateTitle = prompt('Enter template title (display name):');
         if (templateTitle && templateTitle.trim()) {
             const description = prompt('Enter template description (optional):') || '';
+            const author = prompt('Enter author name (optional):') || '';
             fetch('/api/save-template', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     name: templateName.trim(),
                     title: templateTitle.trim(),
-                    description: description.trim()
+                    description: description.trim(),
+                    author: author.trim()
                 })
             })
             .then(response => response.json())
@@ -208,24 +212,49 @@ document.getElementById('save-template').addEventListener('click', function() {
 
 document.getElementById('show-templates').addEventListener('click', function() {
     const templatesList = document.getElementById('templates-list');
+    const mergeTemplatesList = document.getElementById('merge-templates-list');
     const showBtn = document.getElementById('show-templates');
+    const showMergeBtn = document.getElementById('show-merge-templates');
     const hideBtn = document.getElementById('hide-templates');
 
     if (templatesList.style.display === 'none') {
         loadTemplates();
         templatesList.style.display = 'block';
+        mergeTemplatesList.style.display = 'none';
         showBtn.style.display = 'none';
+        showMergeBtn.style.display = 'none';
+        hideBtn.style.display = 'inline-block';
+    }
+});
+
+document.getElementById('show-merge-templates').addEventListener('click', function() {
+    const templatesList = document.getElementById('templates-list');
+    const mergeTemplatesList = document.getElementById('merge-templates-list');
+    const showBtn = document.getElementById('show-templates');
+    const showMergeBtn = document.getElementById('show-merge-templates');
+    const hideBtn = document.getElementById('hide-templates');
+
+    if (mergeTemplatesList.style.display === 'none') {
+        loadMergeTemplates();
+        mergeTemplatesList.style.display = 'block';
+        templatesList.style.display = 'none';
+        showBtn.style.display = 'none';
+        showMergeBtn.style.display = 'none';
         hideBtn.style.display = 'inline-block';
     }
 });
 
 document.getElementById('hide-templates').addEventListener('click', function() {
     const templatesList = document.getElementById('templates-list');
+    const mergeTemplatesList = document.getElementById('merge-templates-list');
     const showBtn = document.getElementById('show-templates');
+    const showMergeBtn = document.getElementById('show-merge-templates');
     const hideBtn = document.getElementById('hide-templates');
 
     templatesList.style.display = 'none';
+    mergeTemplatesList.style.display = 'none';
     showBtn.style.display = 'inline-block';
+    showMergeBtn.style.display = 'inline-block';
     hideBtn.style.display = 'none';
 });
 
@@ -244,17 +273,50 @@ function loadTemplate(templateName, templateTitle) {
                 templateOnlyMode = true;
 
                 alert(data.message || 'Template loaded successfully!');
-                // Hide the templates list
                 document.getElementById('templates-list').style.display = 'none';
                 document.getElementById('show-templates').style.display = 'inline-block';
                 document.getElementById('hide-templates').style.display = 'none';
-                // Re-render UI with only template values
                 renderConfigUI();
             } else {
                 alert('Failed to load template: ' + data.message);
             }
         })
         .catch(err => alert('Failed to load template: ' + err));
+    }
+}
+
+function mergeTemplate(templateName, templateTitle) {
+    if (confirm(`Merge with template "${templateTitle}"? This will add/update your current configuration with template values.`)) {
+        fetch('/api/load-template', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: templateName})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'loaded') {
+                const templateConfigs = data.configs || {};
+                const mergedConfig = {...currentConfig};
+
+                for (const [key, value] of Object.entries(templateConfigs)) {
+                    mergedConfig[key] = value;
+                }
+
+                currentConfig = mergedConfig;
+                allAvailableKeys = Object.keys(currentConfig);
+                templateOnlyMode = false;
+
+                alert(`Successfully merged ${Object.keys(templateConfigs).length} settings from "${templateTitle}"!`);
+                document.getElementById('merge-templates-list').style.display = 'none';
+                document.getElementById('show-templates').style.display = 'inline-block';
+                document.getElementById('show-merge-templates').style.display = 'inline-block';
+                document.getElementById('hide-templates').style.display = 'none';
+                renderConfigUI();
+            } else {
+                alert('Failed to load template for merge: ' + data.message);
+            }
+        })
+        .catch(err => alert('Failed to merge template: ' + err));
     }
 }
 
@@ -282,7 +344,12 @@ function loadTemplates() {
                     const titleDiv = document.createElement('div');
                     titleDiv.style.fontWeight = 'bold';
                     titleDiv.style.marginBottom = '2px';
-                    titleDiv.textContent = template.title;
+
+                    let titleText = template.title;
+                    if (template.author) {
+                        titleText += ` by <strong>${template.author}</strong>`;
+                    }
+                    titleDiv.innerHTML = titleText;
 
                     const infoDiv = document.createElement('div');
                     infoDiv.style.fontSize = '11px';
@@ -340,6 +407,96 @@ function loadTemplates() {
             console.error('Failed to load templates:', err);
             const templatesList = document.getElementById('templates-list');
             templatesList.innerHTML = '<div style="color: #ff6b6b; text-align: center; padding: 20px;">Failed to load templates</div>';
+        });
+}
+
+function loadMergeTemplates() {
+    fetch('/api/list-templates')
+        .then(response => response.json())
+        .then(data => {
+            const mergeTemplatesList = document.getElementById('merge-templates-list');
+            mergeTemplatesList.innerHTML = '';
+
+            if (data.templates && data.templates.length > 0) {
+                data.templates.forEach(template => {
+                    const templateDiv = document.createElement('div');
+                    templateDiv.style.cssText = `
+                        background: rgba(255,255,255,0.05);
+                        border: 1px solid #555;
+                        border-radius: 4px;
+                        padding: 8px;
+                        margin-bottom: 5px;
+                        cursor: pointer;
+                        color: white;
+                        transition: background-color 0.2s;
+                    `;
+
+                    const titleDiv = document.createElement('div');
+                    titleDiv.style.fontWeight = 'bold';
+                    titleDiv.style.marginBottom = '2px';
+
+                    let titleText = template.title;
+                    if (template.author) {
+                        titleText += ` by <strong>${template.author}</strong>`;
+                    }
+                    titleDiv.innerHTML = titleText;
+
+                    const infoDiv = document.createElement('div');
+                    infoDiv.style.fontSize = '11px';
+                    infoDiv.style.color = '#ccc';
+                    infoDiv.textContent = `${template.variables} variables`;
+
+                    if (template.description) {
+                        const descDiv = document.createElement('div');
+                        descDiv.style.fontSize = '11px';
+                        descDiv.style.color = '#aaa';
+                        descDiv.style.marginTop = '2px';
+                        descDiv.textContent = template.description;
+                        templateDiv.appendChild(descDiv);
+                    }
+
+                    if (template.created) {
+                        const dateDiv = document.createElement('div');
+                        dateDiv.style.fontSize = '10px';
+                        dateDiv.style.color = '#888';
+                        dateDiv.style.marginTop = '1px';
+                        dateDiv.textContent = `Created: ${new Date(template.created).toLocaleDateString()}`;
+                        infoDiv.appendChild(dateDiv);
+                    }
+
+                    templateDiv.appendChild(titleDiv);
+                    templateDiv.appendChild(infoDiv);
+
+                    templateDiv.addEventListener('mouseenter', function() {
+                        this.style.background = 'rgba(40,167,69,0.2)';
+                    });
+
+                    templateDiv.addEventListener('mouseleave', function() {
+                        this.style.background = 'rgba(255,255,255,0.05)';
+                    });
+
+                    templateDiv.addEventListener('click', function() {
+                        mergeTemplate(template.name, template.title);
+                    });
+
+                    mergeTemplatesList.appendChild(templateDiv);
+                });
+            } else {
+                const noTemplatesDiv = document.createElement('div');
+                noTemplatesDiv.style.cssText = `
+                    color: #888;
+                    text-align: center;
+                    padding: 20px;
+                    font-style: italic;
+                `;
+                noTemplatesDiv.textContent = 'No templates found. Save some configurations first!';
+                mergeTemplatesList.appendChild(noTemplatesDiv);
+            }
+        })
+        .catch(err => {
+            console.error('Failed to load merge templates:', err);
+            const mergeTemplatesList = document.getElementById('merge-templates-list');
+            mergeTemplatesList.innerHTML = '<div style="color: #ff6b6b; text-align: center; padding: 20px;">Failed to load templates</div>';
         });
 }
 

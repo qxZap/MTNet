@@ -1,0 +1,20 @@
+{
+  "title": "Economy x4",
+  "description": "Quadruple all economy payments and rewards",
+  "author": "qxZap",
+  "created": "2026-01-08T22:10:00",
+  "configs": {
+    "mh.busPaymentMultiplier": 14.0,
+    "mh.cargoPaymentMultiplier": 4,
+    "mh.limoPaymentMultiplier": 4.8,
+    "mh.taxiPaymentMultiplier": 10.8,
+    "mh.towPaymentMultiplier": 4,
+    "mh.policePatrolPayment": 3200,
+    "mh.policePatrolPointPayment": 2000,
+    "mh.policePatrolAreaPayment": 8000,
+    "mh.driverXPMultiplierOnAutopilot": 2.0,
+    "mh.vehicleDriftExpPerSeconds": 1.2,
+    "mh.eventRacingMoneyPerKm": 120,
+    "mh.eventRacingXPPerKm": 40
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "title": "Economy x5",
+  "description": "Quintuple all economy payments and rewards",
+  "author": "qxZap",
+  "created": "2026-01-08T22:15:00",
+  "configs": {
+    "mh.busPaymentMultiplier": 17.5,
+    "mh.cargoPaymentMultiplier": 5,
+    "mh.limoPaymentMultiplier": 6.0,
+    "mh.taxiPaymentMultiplier": 13.5,
+    "mh.towPaymentMultiplier": 5,
+    "mh.policePatrolPayment": 4000,
+    "mh.policePatrolPointPayment": 2500,
+    "mh.policePatrolAreaPayment": 10000,
+    "mh.driverXPMultiplierOnAutopilot": 2.5,
+    "mh.vehicleDriftExpPerSeconds": 1.5,
+    "mh.eventRacingMoneyPerKm": 150,
+    "mh.eventRacingXPPerKm": 50
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Johnny Silverhand",
+  "description": "Enhanced character pushing speed for maximum impact",
+  "author": "qxZap",
+  "created": "2026-01-08T22:35:00",
+  "configs": {
+    "mh.charcterPushingSpeed": 500,
+    "mh.charcterPushingSpeedSprintMultiplayer": 3
+  }
+}

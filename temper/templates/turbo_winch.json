@@ -1,0 +1,10 @@
+{
+  "title": "Turbo Winch",
+  "description": "Stronger winches with 2x speed and power",
+  "author": "qxZap",
+  "created": "2026-01-08T22:40:00",
+  "configs": {
+    "mh.winchSpeed": 6,
+    "mh.ropeSpringMaxKg": 40000
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "title": "Economy x100",
+  "description": "100x all economy payments and rewards",
+  "author": "qxZap",
+  "created": "2026-01-08T22:30:00",
+  "configs": {
+    "mh.busPaymentMultiplier": 350.0,
+    "mh.cargoPaymentMultiplier": 100,
+    "mh.limoPaymentMultiplier": 120.0,
+    "mh.taxiPaymentMultiplier": 270.0,
+    "mh.towPaymentMultiplier": 100,
+    "mh.policePatrolPayment": 80000,
+    "mh.policePatrolPointPayment": 50000,
+    "mh.policePatrolAreaPayment": 200000,
+    "mh.driverXPMultiplierOnAutopilot": 50.0,
+    "mh.vehicleDriftExpPerSeconds": 30.0,
+    "mh.eventRacingMoneyPerKm": 3000,
+    "mh.eventRacingXPPerKm": 1000
+  }
+}

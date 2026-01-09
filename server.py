@@ -28,7 +28,7 @@ def load_config():
         "web_server_target": "https://www.racers.co.kr"
     }
 
-def load_cached_config():
+async def load_cached_config():
     """Load cached config modifications"""
     cache_file = TEMPER_CACHE_PATH / "config_cache.json"
     if cache_file.exists():
@@ -39,23 +39,19 @@ def load_cached_config():
             pass
     else:
         try:
-            async def fetch_remote_config():
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        "https://mt.racers.co.kr/config",
-                        json={"account_id": 0, "version": "0"},
-                        headers={"Content-Type": "application/json"}
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        if "configs" in data:
-                            TEMPER_CACHE_PATH.mkdir(exist_ok=True)
-                            with open(cache_file, 'w') as f:
-                                json.dump(data["configs"], f, indent=2)
-                            return data["configs"]
-            result = asyncio.run(fetch_remote_config())
-            if result:
-                return result
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://mt.racers.co.kr/config",
+                    json={"account_id": 0, "version": "0"},
+                    headers={"Content-Type": "application/json"}
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if "configs" in data:
+                        TEMPER_CACHE_PATH.mkdir(exist_ok=True)
+                        with open(cache_file, 'w') as f:
+                            json.dump(data["configs"], f, indent=2)
+                        return data["configs"]
         except Exception as e:
             print(f"Failed to fetch remote config: {e}")
     return {}
@@ -252,7 +248,7 @@ def create_server_app(server_type="host"):
                 template_status = template.get("status_code", 200)
 
                 if request.method == "POST" and request.url.path == "/config" and "configs" in template_response:
-                    cached_config = load_cached_config()
+                    cached_config = await load_cached_config()
                     if cached_config:
                         merged_configs = template_response["configs"].copy()
                         merged_configs.update(cached_config)
@@ -293,7 +289,7 @@ def create_server_app(server_type="host"):
         @app.get("/api/get-config")
         async def get_config():
             templates = load_templates()
-            cached_config = load_cached_config()
+            cached_config = await load_cached_config()
 
             base_config = {}
             if "POST /config" in templates:
@@ -363,6 +359,7 @@ def create_server_app(server_type="host"):
                                 "file": template_file.name,
                                 "title": data.get("title", template_file.stem),
                                 "description": data.get("description", ""),
+                                "author": data.get("author", ""),
                                 "created": data.get("created", ""),
                                 "variables": len(data.get("configs", {}))
                             })
@@ -381,6 +378,7 @@ def create_server_app(server_type="host"):
                 template_name = data.get("name", "").strip()
                 template_title = data.get("title", "").strip()
                 description = data.get("description", "").strip()
+                author = data.get("author", "").strip()
 
                 if not template_name:
                     return {"status": "error", "message": "Template name is required"}
@@ -394,6 +392,7 @@ def create_server_app(server_type="host"):
                 template_data = {
                     "title": template_title,
                     "description": description,
+                    "author": author,
                     "created": datetime.datetime.now().isoformat(),
                     "configs": current_configs
                 }

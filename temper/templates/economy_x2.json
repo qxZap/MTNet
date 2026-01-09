@@ -1,0 +1,20 @@
+{
+  "title": "Economy x2",
+  "description": "Double all economy payments and rewards",
+  "author": "qxZap",
+  "created": "2026-01-08T22:05:00",
+  "configs": {
+    "mh.busPaymentMultiplier": 7.0,
+    "mh.cargoPaymentMultiplier": 2,
+    "mh.limoPaymentMultiplier": 2.4,
+    "mh.taxiPaymentMultiplier": 5.4,
+    "mh.towPaymentMultiplier": 2,
+    "mh.policePatrolPayment": 1600,
+    "mh.policePatrolPointPayment": 1000,
+    "mh.policePatrolAreaPayment": 4000,
+    "mh.driverXPMultiplierOnAutopilot": 1.0,
+    "mh.vehicleDriftExpPerSeconds": 0.6,
+    "mh.eventRacingMoneyPerKm": 60,
+    "mh.eventRacingXPPerKm": 20
+  }
+}
