@@ -1,86 +1,126 @@
-INTERCEPTING PROXY SERVER
-=========================
+MTNet - My Truck Town Game Modifier
+==================================
 
-This is an intercepting proxy server for mt.racers.co.kr that can:
-- Log incoming requests (configurable)
-- Forward requests to the real server (passthrough mode)
-- Modify responses using templates (temper mode)
+MTNet lets you customize your My Truck Town gaming experience. You can change money earnings, experience points, and many other game settings while you play.
 
-REQUIREMENTS
-============
-- Python 3.8 or higher must be installed
-- Internet connection for passthrough mode
+WHAT YOU CAN DO
+===============
+
+Real-Time Configuration Editor
+------------------------------
+- Change any game setting instantly while playing
+- Add your own custom settings
+- Settings take effect immediately without restarting the game
+
+Economy and Rewards
+-------------------
+- Change how much money you earn from different jobs:
+  - Bus services
+  - Taxi fares
+  - Limousine rides
+  - Tow truck jobs
+  - Police work
+- Adjust experience points for driving and drifting
+- Modify population bonuses
+
+Pre-Made Templates
+------------------
+Ready-to-use setups for common changes:
+- Economy multipliers (2x, 4x, 5x, 10x, 20x, 100x earnings)
+- Special character setups
+- Enhanced vehicle features
+
+Custom Templates
+---------------
+- Save your favorite settings as templates
+- Load complete setups with one click
+- Mix and match different settings
 
 INSTALLATION
 ============
-1. Run install.bat to install required Python packages
-2. Configure server_config.json and map.json as needed
 
-CONFIGURATION
-=============
-server_config.json:
-- intercept_log: true/false - Enable/disable request logging
-- passthrough: true/false - Forward requests to real servers (or block them)
-- temper: true/false - Apply response templates to override responses
+First off, have Python installed and run server.bat before starting the game.
 
-TEMPLATES
-=========
-Templates are stored in the 'temper/' folder as individual JSON files.
-Each file can contain one or more template definitions.
+Add MTNet_P.pak in the Paks folder and then start the game.
 
-Example template file (game_config.json):
-{
-  "POST /config": {
-    "response": {"configs": {...}},
-    "status_code": 200
-  }
-}
+Menu will appear in game.
 
-To silence requests (no logging, no passthrough):
-{
-  "POST /log": {
-    "silence": true
-  }
-}
+HOW TO USE
+==========
 
-RESPONSE FLOW:
-==============
-1. If passthrough=true: Forward request to real server and get response
-2. If passthrough=false: Return default {"status": "ok"} response
-3. If temper=true and template exists: Override response with template
-4. Return final response
+1. Start MTNet by double-clicking server.bat
+2. Put the .pak mod file in your game's Paks folder
+3. Start My Truck Town
+4. Look for the gear icon in the top-right corner
+5. Click it to open the settings menu
 
-map.json:
-- Contains response templates for specific endpoints
-- Format: {"METHOD /path": {"response": {...}, "status_code": 200}}
-
-USAGE
-=====
-1. Run install.bat (first time only)
-2. Run server.bat to start both proxy servers
-3. Configure your application:
-   - mh.hostServerUrl="http://localhost:81"
-   - mh.webServerUrl="http://localhost:82"
-4. Both servers will intercept and forward requests based on configuration
-
-EXAMPLES
-========
-- Default config forwards all requests to mt.racers.co.kr with logging disabled
-- POST /config returns modified game configuration instead of real response
-- Templates can override any endpoint response
+In the menu you can:
+- Change any setting you want
+- Load pre-made templates
+- Save your own custom setups
+- Add new settings using the "Add Setting" button
 
 TROUBLESHOOTING
 ===============
-- Make sure Python is in your PATH
-- Check that port 8081 is not in use by other applications
-- Verify server_config.json and map.json are valid JSON files
-- Enable intercept_log in server_config.json for debugging
 
-FILES
-=====
-- mock_server.py: Main proxy server
-- server_config.json: Configuration settings
-- map.json: Response templates
-- install.bat: Install dependencies
-- server.bat: Start the server
-- requirements.txt: Python dependencies
+Game won't start:
+- Make sure MTNet server is running
+- Check that the .pak file is in the correct Paks folder
+- Make sure ports 81 and 82 aren't blocked
+
+Menu not showing:
+- Verify the game mod is installed correctly
+- Try pressing F5 to refresh the game page
+
+Settings not working:
+- Click "Save All Changes" after making changes
+- Try the "Reload" button
+
+Performance problems:
+- Enable request silencing in templates
+- Make sure you have a good internet connection
+
+TECHNICAL DETAILS
+=================
+
+For advanced users and developers:
+
+Server Configuration (server_config.json):
+- intercept_log: Turn detailed logging on/off
+- passthrough: Send requests to real game servers
+- temper: Use templates to modify responses
+
+Common Game Variables:
+- mh.busPaymentMultiplier: Bus earnings
+- mh.taxiPaymentMultiplier: Taxi earnings
+- mh.limoPaymentMultiplier: Limousine earnings
+- mh.towPaymentMultiplier: Tow truck earnings
+- mh.policePatrolPayment: Police pay
+- mh.driverXPMultiplierOnAutopilot: XP while using autopilot
+- mh.vehicleDriftExpPerSeconds: XP from drifting
+- mh.invalidPartsDisableEngine: What happens with broken parts
+- mh.logFPSPeriodSeconds: Performance logging
+
+Template System:
+Templates are stored in the temper/ folder as JSON files.
+You can create custom templates using the in-game menu or by editing JSON files directly.
+
+Request Silencing:
+Use silenced_*.json templates to block unwanted data from being sent to game servers.
+
+File Structure:
+- server.py: Main server program
+- server_config.json: Server settings
+- requirements.txt: Python packages needed
+- install.bat: Installs dependencies
+- server.bat: Starts the server
+- inject_ui.html: The in-game menu interface
+- temper/: Template storage
+  - game_config.json: Basic game settings
+  - motortown_ui.json: Menu injection
+  - templates/: Your saved templates
+  - silenced_*.json: Data blocking templates
+- temper_cache/: Saved configurations
+
+Safety Notice:
+MTNet only affects your local game. It doesn't change the game for other players or modify game servers. Use responsibly and follow the game's terms of service.
