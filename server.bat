@@ -3,39 +3,87 @@ echo MTNet 1.1
 echo ====================================
 echo.
 
-REM Check if Python is installed
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
+REM Detect Python interpreter: prefer `py -3`, then `python`, then common install locations
+set "PY_CMD="
+py -3 --version >nul 2>&1
+if %errorlevel% equ 0 (
+    set "PY_CMD=py -3"
+) else (
+    python --version >nul 2>&1
+    if %errorlevel% equ 0 (
+        set "PY_CMD=python"
+    ) else (
+        set "PY_EXE="
+        for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python*") do (
+            if exist "%%D\python.exe" set "PY_EXE=%%D\python.exe"
+        )
+        if not defined PY_EXE (
+            for /d %%D in ("C:\Program Files\Python*") do (
+                if exist "%%D\python.exe" set "PY_EXE=%%D\python.exe"
+            )
+        )
+        if defined PY_EXE set "PY_CMD=%PY_EXE%"
+    )
+)
+
+if not defined PY_CMD (
     echo ERROR: Python is not installed or not in PATH.
     echo.
     echo Please install Python 3.8 or higher from: https://python.org
-    echo Make sure to check "Add Python to PATH" during installation.
+    echo Make sure to check "Add Python to PATH" during installation, or install the "py" launcher.
     echo.
     pause
     exit /b 1
 )
 
-echo Python found. Checking for required packages...
-echo.
+echo Using Python: %PY_CMD%
+set "ACTION=%~1"
+set "REQS=fastapi>=0.100.0 uvicorn[standard]>=0.23.0 httpx>=0.24.0"
 
-REM Try to install requirements, with fallback to python -m pip
-pip install -r requirements.txt >nul 2>&1
+echo Verifying required Python imports...
+%PY_CMD% -c "import fastapi, uvicorn, httpx" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Pip not found in PATH, trying python -m pip...
-    python -m pip install -r requirements.txt
-    if %errorlevel% neq 0 (
-        echo.
-        echo ERROR: Failed to install required packages.
-        echo Make sure you have internet connection and Python is properly installed.
-        echo.
-        pause
-        exit /b 1
-    )
+    if /i "%ACTION%"=="install" goto InstallDeps
+
+    echo ERROR: Required Python packages are not installed.
+    echo Run: %~nx0 install
+    echo.
+    echo Exit code 0 indicates a dependency install is required.
+    exit /b 0
+)
+
+if /i "%ACTION%"=="install" (
+    echo Dependencies already installed; skipping install.
+) else (
+    goto CheckPorts
+)
+
+:InstallDeps
+echo Checking/Installing required packages...
+%PY_CMD% -m pip --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Pip not found for this Python. Attempting to ensure pip is available...
+    %PY_CMD% -m ensurepip --upgrade >nul 2>&1
+)
+%PY_CMD% -m pip install --upgrade pip >nul 2>&1
+
+echo Installing packages: %REQS%
+%PY_CMD% -m pip install %REQS%
+if %errorlevel% neq 0 (
+    echo.
+    echo ERROR: Failed to install required packages.
+    echo Try running: %PY_CMD% -m pip install %REQS%
+    echo.
+    pause
+    exit /b 1
 )
 
 echo Requirements installed successfully.
 echo.
 
+goto CheckPorts
+
+:CheckPorts
 REM Check if ports are available using netstat (this will also detect if our server is running)
 netstat -an | find "LISTENING" | find ":81" >nul 2>&1
 if %errorlevel% equ 0 (
@@ -64,25 +112,6 @@ if %errorlevel% equ 0 (
     echo 3. Run server.bat again
     echo.
     echo If another application is using port 82, you may need to close it first.
-    echo.
-    pause
-    exit /b 1
-)
-
-REM Check if ports are available using netstat
-netstat -an | find "LISTENING" | find ":81" >nul 2>&1
-if %errorlevel% equ 0 (
-    echo ERROR: Port 81 is already in use by another application.
-    echo Please close the application using port 81 or choose a different port.
-    echo.
-    pause
-    exit /b 1
-)
-
-netstat -an | find "LISTENING" | find ":82" >nul 2>&1
-if %errorlevel% equ 0 (
-    echo ERROR: Port 82 is already in use by another application.
-    echo Please close the application using port 82 or choose a different port.
     echo.
     pause
     exit /b 1
