@@ -1,0 +1,13 @@
+{
+  "title": "Cargo Stack Unlimited",
+  "description": "Lifts the cargo stacking height and weight caps, and raises the payment weight caps so a heavy load still pays. Height is in metres (default ~4m), relaxation in cm. Capitalist Economy handles the volume discount (PaymentSqrtRatio). Tune down in the panel if a value misbehaves.",
+  "author": "qxZap",
+  "created": "2026-11-02T00:00:00",
+  "configs": {
+    "mh.cargoStackMaxVehicleHeight": 50,
+    "mh.cargoStackMaxWeight": 1000000,
+    "mh.cargoHeightRelaxationOnReload": 10000,
+    "mh.cargoMaxWeightForPaymentCalculation": 1000000,
+    "mh.cargoMaxWeightForNonAutoloadingPaymentCalculation": 1000000
+  }
+}

@@ -1,5 +1,0 @@
-{
-  "POST /vehicles": {
-    "silence": true
-  }
-}
