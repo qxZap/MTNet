@@ -45,6 +45,6 @@ Launch the game and press **CTRL+F9** to open the panel.
 
 ## Build
 
-`build.bat` (MSVC 2022, x64) writes `out\mt_plugin_MTNet.dll`. It compiles the one
-plugin against the loader headers in `include\` and `src\ini_merge.h`; nothing
-else is needed.
+`build.bat` (MSVC 2022, x64, and Python 3) writes `out\mt_plugin_MTNet.dll`. It first embeds
+`plugins\mt_net_panel.html` into the dll (`tools\embed_panel.py` -> `plugins\mt_net_panel.inc`), then compiles
+the one plugin against the loader headers in `include\` and `src\ini_merge.h`.

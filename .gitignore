@@ -1,4 +1,6 @@
-out/
-*.obj
 *.exp
 *.lib
+*.obj
+out/
+out/
+plugins/mt_net_panel.inc
