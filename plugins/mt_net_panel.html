@@ -1005,6 +1005,13 @@ kbd{
             <span class="nav__label">Server data</span>
             <span class="nav__badge" id="navBadgeEvents">0</span>
           </button>
+          <button class="nav__item" type="button" data-view="network" title="Network">
+            <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 7h16M4 12h10M4 17h6"/><path d="M17 15l4 4M21 15l-4 4"/>
+            </svg>
+            <span class="nav__label">Network</span>
+            <span class="nav__badge" id="navBadgeNet">0</span>
+          </button>
           <button class="nav__item" type="button" data-view="settings" title="Settings">
             <svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z"/>
@@ -1180,6 +1187,20 @@ kbd{
             <div class="events" id="eventList"></div>
           </section>
 
+          <!-- ---------- network (temper) ---------- -->
+          <section class="view view--events" id="view-network" aria-label="Network" hidden>
+            <div class="toolbar">
+              <div>
+                <h2 class="topbar__title" style="font-size:15px">Silenced requests</h2>
+                <p class="topbar__sub" style="margin:0">answered here instead of going to the game's server; changes apply at once</p>
+              </div>
+              <span class="topbar__spacer"></span>
+              <span class="chip" id="netSummary">-</span>
+              <button class="btn btn--sm" type="button" id="btnTemper">Temper: -</button>
+            </div>
+            <div class="events" id="netList"></div>
+          </section>
+
           <!-- ---------- settings ---------- -->
           <section class="view view--stack" id="view-settings" aria-label="Settings" hidden>
             <div class="scroll">
@@ -1348,6 +1369,7 @@ kbd{
     catalogue: { title: 'Catalogue',       sub: 'Every console variable the engine knows about' },
     templates: { title: 'Templates',       sub: 'Ready-made sets of console variables' },
     events:    { title: 'Server data',      sub: 'The pushes the server sent to the game' },
+    network:   { title: 'Network',          sub: 'Every request the game sent, and which ones never leave this PC' },
     settings:  { title: 'Settings',         sub: 'How MTNet is wired up' }
   };
 
@@ -1512,6 +1534,12 @@ kbd{
   function switchView(name){
     if (!VIEWS[name]) name = 'dashboard';
     state.view = name;
+    // each page has its own address, so a reload stays here (/panel on the game's port is the dashboard)
+    var base = location.pathname.indexOf('/panel') === 0 ? '/panel/' : '/';  // the game's web port only owns /panel...
+    var want = base + name;
+    if (location.pathname !== want)
+      try { history.replaceState(null, '', want + location.search); } catch (e) {}
+    if (name === 'network' && typeof netCall === 'function') netCall();
 
     var views = el.views.querySelectorAll('.view');
     for (var i = 0; i < views.length; i++){
@@ -2364,10 +2392,63 @@ kbd{
     el.originText.textContent = (location.origin && location.origin !== 'null') ? location.origin : 'the origin this page was served from';
   }
 
+  /* ---------- network: temper rules and live request counts ---------------- */
+
+  var net = { data: null };
+  function netCall(body){
+    return fetch(body ? '/api/temper-set' : '/api/temper', body ? { method: 'POST', body: JSON.stringify(body) } : {})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ net.data = d; renderNet(); })
+      .catch(function(){});
+  }
+  function netRow(title, sub, on, onClick, label){
+    var card = document.createElement('div'); card.className = 'event';
+    var head = document.createElement('div'); head.className = 'event__head';
+    var path = document.createElement('div'); path.className = 'event__path';
+    path.textContent = title;
+    var small = document.createElement('div'); small.style.cssText = 'font-size:12px;color:var(--text-3)';
+    small.textContent = sub; path.appendChild(small);
+    var acts = document.createElement('div'); acts.className = 'event__actions';
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn--sm';
+    b.textContent = label; if (on) b.style.cssText = 'border-color:var(--accent);color:var(--accent)';
+    b.addEventListener('click', onClick);
+    acts.appendChild(b); head.appendChild(path); head.appendChild(acts); card.appendChild(head);
+    return card;
+  }
+  function renderNet(){
+    var d = net.data, list = $('netList');
+    if (!d || !list) return;
+    $('btnTemper').textContent = 'Temper: ' + (d.on ? 'ON' : 'OFF');
+    $('btnTemper').style.cssText = d.on ? 'border-color:var(--accent);color:var(--accent)' : '';
+    var total = 0, quiet = 0;
+    d.seen.forEach(function(s){ total += s.count; quiet += s.silenced; });
+    $('netSummary').textContent = total + ' requests, ' + quiet + ' silenced';
+    $('navBadgeNet').textContent = quiet;
+    list.textContent = '';
+    var h = document.createElement('h3'); h.textContent = 'Rules'; h.style.cssText = 'margin:0;font-size:13px;color:var(--text-2)';
+    list.appendChild(h);
+    d.rules.forEach(function(r){
+      list.appendChild(netRow(r.key, r.hits + ' silenced this session', r.on,
+        function(){ netCall({ key: r.key, on: !r.on }); }, r.on ? 'Silenced' : 'Forwarded'));
+    });
+    var h2 = document.createElement('h3'); h2.textContent = 'What the game sent (this session)'; h2.style.cssText = h.style.cssText;
+    list.appendChild(h2);
+    d.seen.slice().sort(function(a, b){ return b.count - a.count; }).forEach(function(s){
+      var ruled = d.rules.some(function(r){ return r.key === s.key; });
+      var sub = s.count + ' times, ' + Math.round(s.bytes / 1024) + ' KB sent, last ' + s.agoS + ' s ago' +
+                (s.count > s.silenced ? ', server answered in ' + s.avgMs + ' ms (worst ' + s.worstMs + ')' : '') +
+                (s.silenced ? ', ' + s.silenced + ' silenced' : '');
+      list.appendChild(netRow(s.key, sub, false, function(){ netCall({ key: s.key, on: true }); }, ruled ? 'Has a rule' : 'Silence this'));
+    });
+  }
+  $('btnTemper').addEventListener('click', function(){ if (net.data) netCall({ on: !net.data.on }); });
+  setInterval(function(){ if (state.view === 'network') netCall(); }, 2000);
+  netCall();
+
   /* ---------- boot -------------------------------------------------------- */
 
   wire();
-  switchView('dashboard');
+  switchView(location.pathname.replace(/^\/(panel\/?)?/, '') || 'dashboard');
   renderVars();
   renderDashboard();
   renderEvents();

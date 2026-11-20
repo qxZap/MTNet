@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -54,6 +55,8 @@ struct Cfg {
     int port = 81, webPort = 82;
     std::wstring target = L"https://mt.racers.co.kr/", webTarget = L"https://www.racers.co.kr";
     bool log = false;
+    bool showHidden = true;  // [MTNet] ShowHidden: the server list keeps servers the backend marks hidden (hide 2: over 100 slots)
+    bool dump = false;  // [MTNet] Dump=1: every exchange with the game's servers, whole, to logs/MTNet/traffic
 };
 
 Cfg g_cfg;
@@ -109,19 +112,50 @@ std::wstring gameConfigDir() {
 // Point the game at us: the same two console variables the pak set.
 // The value has to be quoted. An ini treats // as a comment, so an unquoted
 // http://localhost:82 is read as "http:" and the game never comes to us.
+void setGameUrlsLive(void*);
+int g_urlPort, g_urlWebPort;
+// The panel's pages have their own addresses (/network, /events, ...) so a reload stays on the page.
+bool isPanelPath(std::string p) {
+    if (p.rfind("/panel/", 0) == 0) p = p.substr(6);  // /panel/network: the copy on the game's own web port
+    static const char* const v[] = {"/", "", "/panel", "/dashboard", "/vars", "/catalogue", "/templates", "/events", "/network", "/settings"};
+    for (const char* x : v) if (p == x) return true;
+    return false;
+}
 void writeGameUrls(int port, int webPort) {
     std::wstring dir = gameConfigDir();
     if (dir.empty()) return;
     CreateDirectoryW(dir.c_str(), nullptr);
     std::wstring path = dir + L"\\UserEngine.ini";
-    char body[256];
-    sprintf(body, "[ConsoleVariables]\r\nmh.hostServerUrl=\"http://localhost:%d/\"\r\nmh.webServerUrl=\"http://localhost:%d\"\r\n",
-            port, webPort);
-    FILE* f = _wfopen(path.c_str(), L"wb");
-    if (!f) return;
-    fputs(body, f);
-    fclose(f);
-    MT_LOG("game pointed at us: %s", body);
+    // Only these two keys: the file also carries other plugins' sections (Motortown Connect's DirectIP).
+    wchar_t host[64], web[64];
+    swprintf_s(host, L"\"http://localhost:%d/\"", port);
+    swprintf_s(web, L"\"http://localhost:%d\"", webPort);
+    WritePrivateProfileStringW(L"ConsoleVariables", L"mh.hostServerUrl", host, path.c_str());
+    WritePrivateProfileStringW(L"ConsoleVariables", L"mh.webServerUrl", web, path.c_str());
+    MT_LOG("game pointed at us: hostServerUrl %ls, webServerUrl %ls", host, web);
+    g_urlPort = port; g_urlWebPort = webPort;
+    for (int i = 0; i < 300 && !api->game_thread_ready(); i++) Sleep(200);
+    api->run_on_game_thread(setGameUrlsLive, nullptr);
+}
+
+// The ini alone stopped working (2026-11-10: the game talked to 3.38.23.46:443 directly with UserEngine.ini pointing
+// at us), so the two variables are also set in the running game, "by console", which outranks any ini. Run on the game
+// thread; no world context is needed, ExecuteConsoleCommand falls back to GEngine->Exec.
+
+void execConsole(const wchar_t* cmd) {
+    static uintptr_t ksl = api->find_object("KismetSystemLibrary", "Default__KismetSystemLibrary", "/Script/Engine");
+    static uintptr_t fn = api->find_object("Function", "ExecuteConsoleCommand", "KismetSystemLibrary");
+    if (!ksl || !fn) { MT_LOG("ExecuteConsoleCommand not found"); return; }
+    unsigned char p[0x40] = {0};
+    struct { const wchar_t* data; int num, max; } f = {cmd, (int)wcslen(cmd) + 1, (int)wcslen(cmd) + 1};
+    memcpy(p + api->field_offset(fn, "Command"), &f, sizeof f);
+    api->process_event(ksl, fn, p);
+}
+void setGameUrlsLive(void*) {
+    wchar_t c[96];
+    swprintf_s(c, L"mh.hostServerUrl http://localhost:%d/", g_urlPort); execConsole(c);
+    swprintf_s(c, L"mh.webServerUrl http://localhost:%d", g_urlWebPort); execConsole(c);
+    MT_LOG("game pointed at us live (console): host %d, web %d", g_urlPort, g_urlWebPort);
 }
 
 // ---- a small JSON subset: a flat object of scalars ----
@@ -283,7 +317,7 @@ std::vector<std::pair<std::string, std::string>> mergedConfigs() {
     return base;
 }
 
-std::wstring cfgIni() { return gameDir() + L"mt_net.ini"; }
+std::wstring cfgIni() { return iniPath(L"mt_net.ini"); }
 
 // The console variables we want the game to run with, from [CVars].
 std::vector<std::pair<std::string, std::string>> cvarOverrides() {
@@ -362,6 +396,7 @@ std::string randomText(int n) {
     for (int i = 0; i < n; i++) out[i] = alphabet[buf[i] % m];
     return out;
 }
+int unhide(std::string& body);
 bool selfCheck() {
     std::vector<std::pair<std::string, std::string>> ours{{"mh.x", "9"}};
     std::string got = temperConfig("{\"configs\":{\"mh.x\":1,\"mh.y\":2}}", ours);
@@ -379,6 +414,8 @@ bool selfCheck() {
          !serverExe(L"C:\\game\\MotorTown-Win64-Shipping.exe");
     std::string rnd = randomText(20);
     ok = ok && rnd.size() == 20;
+    std::string hosts = "{\"hosts\":[{\"hide\":2,\"x\":1},{\"hide\":0},{\"hide\":12}]}";
+    ok = ok && unhide(hosts) == 1 && hosts == "{\"hosts\":[{\"hide\":0,\"x\":1},{\"hide\":0},{\"hide\":12}]}";
     MT_LOG("self-check: %s", ok ? "ok" : "FAILED");
     return ok;
 }
@@ -581,6 +618,10 @@ std::string forward(const std::wstring& target, const Request& req, bool inject)
                 exportCvars(body);
                 MT_LOG("config: status %lu, %zu bytes", status, body.size());
             }
+            if (g_cfg.showHidden && req.target.substr(0, req.target.find('?')) == "/hosts") {
+                int shown = unhide(body);
+                if (shown) MT_LOG("server list: %d hidden server(s) shown", shown);
+            }
             // Give the game its cookies back.
             wchar_t cookie[2048] = {0};
             DWORD clen = sizeof cookie;
@@ -765,12 +806,110 @@ std::vector<std::string> moduleCVars() {
     return cache;
 }
 
+// ---- temper: requests answered here instead of going to the game's server ----
+// The Python MTNet's "silence" templates, rebuilt: blocking the game's metrics posts was worth 12-20% fps to the
+// user. A rule is "METHOD /path", * a wildcard, kept in mt_net.ini [Temper] as key=1/0; [MTNet] Temper is the master
+// switch. Both change live from the panel's Network page. Every request is counted, with how long the real server
+// took to answer, so a new candidate shows up there before anyone writes a rule for it.
+struct Rule { std::string key; bool on; long hits; };
+struct Seen { long count = 0, silenced = 0; long long bytes = 0; double ms = 0, worstMs = 0; DWORD last = 0; };
+std::mutex g_tLock;
+std::vector<Rule> g_rules;
+std::map<std::string, Seen> g_seen;
+std::atomic<bool> g_temper{true};
+const char* const kDefaultRules[] = {"POST /event/*", "POST /log", "POST /workshop/installed", "POST /vehicles",
+                                     "POST /character", "POST /building", "POST /account_modify",
+                                     "POST /add_playtime"};
+
+bool globMatch(const char* p, const char* s) {
+    if (!*p) return !*s;
+    if (*p == '*') return globMatch(p + 1, s) || (*s && globMatch(p, s + 1));
+    return *s == *p && globMatch(p + 1, s + 1);
+}
+void loadRules() {
+    std::vector<wchar_t> buf(32768);
+    DWORD n = GetPrivateProfileSectionW(L"Temper", buf.data(), (DWORD)buf.size(), cfgIni().c_str());
+    std::lock_guard<std::mutex> g(g_tLock);
+    g_rules.clear();
+    for (const wchar_t* e = buf.data(); n && *e; e += wcslen(e) + 1) {
+        std::string line = toNarrow(e);
+        size_t eq = line.rfind('=');
+        if (eq == std::string::npos) continue;
+        g_rules.push_back({trim(line.substr(0, eq)), trim(line.substr(eq + 1)) != "0", 0});
+    }
+    if (g_rules.empty())
+        for (const char* k : kDefaultRules) {
+            g_rules.push_back({k, true, 0});
+            WritePrivateProfileStringW(L"Temper", toWide(k).c_str(), L"1", cfgIni().c_str());
+        }
+    g_temper = iniNum(L"mt_net.ini", L"MTNet", L"Temper", 1) != 0;
+    MT_LOG("temper %s: %zu rule(s)", g_temper ? "on" : "OFF", g_rules.size());
+}
+// The rule that silences this request, or "" to forward it.
+std::string silencedBy(const std::string& key) {
+    if (!g_temper) return "";
+    std::lock_guard<std::mutex> g(g_tLock);
+    for (auto& r : g_rules)
+        if (r.on && globMatch(r.key.c_str(), key.c_str())) { r.hits++; return r.key; }
+    return "";
+}
+void countRequest(const std::string& key, size_t bytes, bool silenced, double ms) {
+    std::lock_guard<std::mutex> g(g_tLock);
+    if (g_seen.size() > 300 && !g_seen.count(key)) return;  // ids in paths would grow it without end
+    Seen& s = g_seen[key];
+    s.count++; s.bytes += bytes; s.last = GetTickCount();
+    if (silenced) s.silenced++;
+    else { s.ms += ms; if (ms > s.worstMs) s.worstMs = ms; }
+}
+std::string temperJson() {
+    std::lock_guard<std::mutex> g(g_tLock);
+    std::string out = std::string("{\"on\":") + (g_temper ? "true" : "false") + ",\"rules\":[";
+    for (size_t i = 0; i < g_rules.size(); i++) {
+        if (i) out += ",";
+        out += "{\"key\":\"" + jsonEscape(g_rules[i].key) + "\",\"on\":" + (g_rules[i].on ? "true" : "false") +
+               ",\"hits\":" + std::to_string(g_rules[i].hits) + "}";
+    }
+    out += "],\"seen\":[";
+    DWORD now = GetTickCount();
+    bool first = true;
+    for (auto& [k, v] : g_seen) {
+        long fwd = v.count - v.silenced;
+        char b[256];
+        snprintf(b, sizeof b, ",\"count\":%ld,\"silenced\":%ld,\"bytes\":%lld,\"avgMs\":%.0f,\"worstMs\":%.0f,\"agoS\":%lu}",
+                 v.count, v.silenced, v.bytes, fwd ? v.ms / fwd : 0.0, v.worstMs, (unsigned long)((now - v.last) / 1000));
+        out += std::string(first ? "" : ",") + "{\"key\":\"" + jsonEscape(k) + "\"" + b;
+        first = false;
+    }
+    return out + "]}";
+}
+std::string temperSet(const std::string& body) {
+    bool on = body.find("\"on\":true") != std::string::npos;
+    std::string key = jsonString(body, "key");
+    if (key.empty()) {  // the master switch
+        g_temper = on;
+        WritePrivateProfileStringW(L"MTNet", L"Temper", on ? L"1" : L"0", cfgIni().c_str());
+        MT_LOG("temper switched %s", on ? "ON" : "OFF");
+        return temperJson();
+    }
+    {
+        std::lock_guard<std::mutex> g(g_tLock);
+        auto it = std::find_if(g_rules.begin(), g_rules.end(), [&](const Rule& r) { return r.key == key; });
+        if (it == g_rules.end()) g_rules.push_back({key, on, 0});
+        else it->on = on;
+    }
+    WritePrivateProfileStringW(L"Temper", toWide(key).c_str(), on ? L"1" : L"0", cfgIni().c_str());
+    MT_LOG("temper rule %s %s", key.c_str(), on ? "on" : "off");
+    return temperJson();
+}
+
 // ---- the API the pak's UI talks to ----
 std::string apiAnswer(const Request& req) {
     std::string path = req.target;
     size_t q = path.find('?');
     if (q != std::string::npos) path = path.substr(0, q);
     if (path == "/api/get-config") return cvarJson();
+    if (path == "/api/temper") return temperJson();
+    if (path == "/api/temper-set") return temperSet(req.body);
     if (path == "/api/save-config")
         return saveCvars(req.body)
             ? "{\"status\":\"saved\",\"message\":\"Configuration saved! Restart the game for the numbers to apply.\"}"
@@ -842,9 +981,59 @@ std::string apiAnswer(const Request& req) {
 // A response, with the headers a client needs. One request per connection:
 // the game is not a browser and does not want keep-alive. Nothing is cached:
 // the panel is a page that changes under the player's hands.
+// The backend's /hosts marks some servers "hide":2 (2026-11-20: a server with more than 100 slots; full, passworded
+// and modded servers stay 0) and the game leaves those out of its list. Rewritten to 0 here: same length, so nothing
+// else in the response moves.
+int unhide(std::string& body) {
+    int n = 0;
+    for (size_t at = body.find("\"hide\":"); at != std::string::npos; at = body.find("\"hide\":", at + 7)) {
+        size_t v = at + 7;
+        if (v < body.size() && body[v] >= '1' && body[v] <= '9' && (v + 1 >= body.size() || !isdigit((unsigned char)body[v + 1]))) { body[v] = '0'; n++; }
+    }
+    return n;
+}
+
 std::string httpAnswer(const std::string& body, const char* status = "200 OK") {
     return "HTTP/1.1 " + std::string(status) + "\r\nContent-Type: application/json\r\nContent-Length: " +
            std::to_string(body.size()) + "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" + body;
+}
+
+// [MTNet] Dump=1: one file per exchange (request line, headers, body; then the whole response as sent back to the
+// game), in plugins\logs\MTNet\traffic\<session start>\, plus index.tsv. The user's own analysis of what goes over
+// the wire. Off by default: the files carry the session's auth headers.
+std::mutex g_dumpLock;
+void dumpExchange(const Request& req, const std::string& answer, const char* what, double ms) {
+    static std::wstring dir;
+    static int n = 0;
+    std::lock_guard<std::mutex> g(g_dumpLock);
+    if (dir.empty()) {
+        SYSTEMTIME t; GetLocalTime(&t);
+        wchar_t stamp[32]; swprintf(stamp, 32, L"%04d-%02d-%02d_%02d-%02d-%02d", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+        std::wstring d = gameDir() + L"plugins\\logs";
+        CreateDirectoryW(d.c_str(), nullptr); d += L"\\MTNet"; CreateDirectoryW(d.c_str(), nullptr);
+        d += L"\\traffic"; CreateDirectoryW(d.c_str(), nullptr); d += L"\\"; d += stamp; CreateDirectoryW(d.c_str(), nullptr);
+        dir = d + L"\\";
+    }
+    std::string path = req.target.substr(0, req.target.find('?')), slug;
+    for (char c : path) slug += isalnum((unsigned char)c) ? c : '_';
+    if (slug.size() > 60) slug.resize(60);
+    char name[128]; snprintf(name, sizeof name, "%05d_%s%s.txt", ++n, req.method.c_str(), slug.c_str());
+    SYSTEMTIME t; GetLocalTime(&t);
+    char when[32]; snprintf(when, sizeof when, "%02d:%02d:%02d.%03d", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
+    if (FILE* f = _wfopen((dir + toWide(name)).c_str(), L"wb")) {
+        fprintf(f, "=== %s REQUEST (%s)\n%s %s %s\n%s\n", when, what, req.method.c_str(), req.target.c_str(), req.version.c_str(), req.headers.c_str());
+        fwrite(req.body.data(), 1, req.body.size(), f);
+        fprintf(f, "\n\n=== RESPONSE (%.0f ms, %zu bytes)\n", ms, answer.size());
+        fwrite(answer.data(), 1, answer.size(), f);
+        fclose(f);
+    }
+    size_t sp = answer.find(' '), sp2 = sp == std::string::npos ? sp : answer.find(' ', sp + 1);
+    std::string status = sp2 == std::string::npos ? "?" : answer.substr(sp + 1, sp2 - sp - 1);
+    if (FILE* f = _wfopen((dir + L"index.tsv").c_str(), L"ab")) {
+        if (n == 1) fputs("file\ttime\tmethod\ttarget\thandled\tstatus\tms\trequest_bytes\tresponse_bytes\n", f);
+        fprintf(f, "%s\t%s\t%s\t%s\t%s\t%s\t%.0f\t%zu\t%zu\n", name, when, req.method.c_str(), req.target.c_str(), what, status.c_str(), ms, req.body.size(), answer.size());
+        fclose(f);
+    }
 }
 
 void serve(SOCKET client, const std::wstring& target, bool inject) {
@@ -865,14 +1054,27 @@ void serve(SOCKET client, const std::wstring& target, bool inject) {
     if (!answer.empty()) {
         answer = httpAnswer(answer);                    // our own API
         MT_LOG("api %s -> %zu bytes", req.target.c_str(), answer.size());
-    } else if (req.target == "/" || req.target == "/panel") {
+    } else if (req.target == "/" || req.target == "/panel" || (req.target.rfind("/panel/", 0) == 0 && isPanelPath(req.target.substr(0, req.target.find('?'))))) {
+        // only /panel...: every other path belongs to the real web server
         std::string page = panelPage();
         answer = page.empty() ? httpAnswer("{\"error\":\"panel missing\"}", "404 Not Found")
                               : httpRaw("200 OK", "text/html; charset=utf-8", page);
     } else if (req.target.rfind("/api/", 0) == 0) {
         answer = httpAnswer("{\"error\":\"not found\"}", "404 Not Found");
     } else {
-        answer = forward(target, req, inject);          // already a whole response
+        std::string path = req.target.substr(0, req.target.find('?'));
+        std::string key = req.method + " " + path;
+        std::string rule = silencedBy(key);
+        LARGE_INTEGER f, a, b;
+        QueryPerformanceFrequency(&f); QueryPerformanceCounter(&a);
+        if (!rule.empty()) {
+            answer = httpAnswer("{\"status\":\"silenced\",\"message\":\"Request silenced\"}");
+            if (g_cfg.log) MT_LOG("silenced %s (%s, %zu bytes): %.300s", key.c_str(), rule.c_str(), req.body.size(), req.body.c_str());
+        } else answer = forward(target, req, inject);   // already a whole response
+        QueryPerformanceCounter(&b);
+        double ms = 1000.0 * (b.QuadPart - a.QuadPart) / f.QuadPart;
+        countRequest(key, req.body.size(), !rule.empty(), ms);
+        if (g_cfg.dump) dumpExchange(req, answer, rule.empty() ? "forwarded" : "silenced", ms);
     }
     sendAll(client, answer);
     shutdown(client, SD_SEND);
@@ -967,10 +1169,19 @@ std::string loginPage(bool wrong) {
     return httpRaw(wrong ? "401 Unauthorized" : "200 OK", "text/html; charset=utf-8", body);
 }
 
+static const unsigned char kPanel[] = {
+#include "mt_net_panel.inc"
+};
+
+static std::string panelHtml() {
+    std::string page = readFile(gameDir() + L"mt_net_panel.html");
+    return page.empty() ? std::string((const char*)kPanel, sizeof kPanel) : page;
+}
+
 std::string panelPage() {
     // Fresh from disk every request: edit mt_net_panel.html, reload, no restart.
-    // Returns the body only (empty when missing); callers frame it / 404.
-    return readFile(gameDir() + L"mt_net_panel.html");
+    // Returns the body only; callers frame it.
+    return panelHtml();
 }
 
 void servePanel(SOCKET client) {
@@ -989,7 +1200,7 @@ void servePanel(SOCKET client) {
         }
     } else if (!panelAuthed(req)) {
         answer = path.rfind("/api/", 0) == 0 ? httpAnswer("{\"error\":\"login\"}", "401 Unauthorized") : loginPage(false);
-    } else if (path == "/" || path.empty()) {
+    } else if (isPanelPath(path)) {
         std::string page = panelPage();
         answer = page.empty() ? httpAnswer("{\"error\":\"panel missing\"}", "404 Not Found")
                               : httpRaw("200 OK", "text/html; charset=utf-8", page);
@@ -1368,7 +1579,7 @@ int g_panelPort = 0;
     std::string answer = apiAnswer(req);
     if (!answer.empty()) {
         answer = httpAnswer(answer);
-    } else if (req.target == "/" || req.target == "/panel") {
+    } else if (isPanelPath(req.target.substr(0, req.target.find('?')))) {
         std::string page = panelPage();
         answer = page.empty() ? httpAnswer("{\"error\":\"panel missing\"}", "404 Not Found")
                               : httpRaw("200 OK", "text/html; charset=utf-8", page);
@@ -1468,10 +1679,14 @@ static DWORD WINAPI run(LPVOID) {
     if (!t.empty()) g_cfg.target = t;
     if (!wt.empty()) g_cfg.webTarget = wt;
     g_cfg.log = iniNum(L"mt_net.ini", L"MTNet", L"Log", 0) != 0;
+    g_cfg.dump = iniNum(L"mt_net.ini", L"MTNet", L"Dump", 0) != 0;
+    g_cfg.showHidden = iniNum(L"mt_net.ini", L"MTNet", L"ShowHidden", 1) != 0;
+    if (g_cfg.dump) MT_LOG("dump on: every exchange goes to plugins/logs/MTNet/traffic");
+    loadRules();
     MT_LOG("host %d -> %ls, web %d -> %ls", g_cfg.port, g_cfg.target.c_str(), g_cfg.webPort, g_cfg.webTarget.c_str());
 
     bool server = dedicatedServer();
-    g_panel = readFile(gameDir() + L"mt_net_panel.html");
+    g_panel = panelHtml();
     if (g_panel.empty())
         MT_LOG("mt_net_panel.html is missing from the game folder -- no tablet");
     else
@@ -1526,6 +1741,7 @@ static DWORD WINAPI run(LPVOID) {
 
 extern "C" __declspec(dllexport) int PluginInit(const MtApi* a) {
     if (!attach(a)) return 1;
+    if (iniDisabled(L"mt_net.ini")) return 0;
     CloseHandle(CreateThread(nullptr, 0, run, nullptr, 0, nullptr));
     return 0;
 }

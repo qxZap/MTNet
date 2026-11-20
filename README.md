@@ -18,6 +18,17 @@ lets you:
 On a dedicated server the panel is reachable too, protected by a password written
 to `mt_net.ini` on first run.
 
+Two switches in `plugins\mt_net.ini`, `[MTNet]`:
+
+- `Dump=1` records every exchange between the game and its servers in full, request headers and body, then the
+  whole response, to `plugins\logs\MTNet	raffic\<session start>\` (one file each, plus `index.tsv`). Off by
+  default: the files carry the session's auth headers, so do not share them as they are.
+- `ShowHidden=1` (default) keeps servers the backend marks hidden (`"hide":2` in `/hosts`; more than 100 slots) in the
+  game's server list.
+
+A dedicated server and a game on the same PC need different `Port` / `WebPort` / `UiPort` values: two copies on the
+same ports share them, and the game's requests reach the wrong one.
+
 ## Install
 
 Needs the [Plugin Loader](https://github.com/qxZap/mt-plugin-loader)
